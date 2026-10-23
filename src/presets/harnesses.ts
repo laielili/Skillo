@@ -51,6 +51,13 @@ export const HARNESS_PRESETS: readonly HarnessPreset[] = [
   // Id and display name follow the skills CLI table (hermes-agent); the path is
   // unchanged at ~/.hermes/skills/.
   { id: 'hermes-agent', name: 'Hermes Agent', segments: ['.hermes', 'skills'], verified: false },
+  // Official DeepSeek agent harness (npm @deepseek-ai/dsh, repo
+  // deepseek-ai/deepseek-harness). User-level skill roots come from
+  // @deepseek-ai/dsh-skill-filesystem, ranked: ~/.dsh/skills (user-dsh, 400)
+  // beats ~/.agents/skills (user-agents, 500), so ~/.dsh/skills is the one to
+  // link into. Project-level roots are <root>/.dsh/skills (100) and
+  // <root>/.agents/skills (200). DSH_HOME overrides the home directory.
+  { id: 'deepseek', name: 'DeepSeek Harness', segments: ['.dsh', 'skills'], verified: false },
 ];
 
 export function findPreset(id: string): HarnessPreset | undefined {

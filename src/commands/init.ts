@@ -46,10 +46,10 @@ export function runInit(input: InitInput): InitResult {
 
   if (anchor.mode === 'broken') {
     throw envError(
-      `锚点指向的目标不可达：${anchorPath}`,
+      `the anchor target is unreachable: ${anchorPath}`,
       anchor.danglingTarget === null
-        ? '目标路径已不存在。若在移动硬盘上，请先挂载'
-        : `它原本指向 ${anchor.danglingTarget}。恢复该路径，或先删除这个断链`,
+        ? 'the target path no longer exists. if it lives on an external drive, mount it first'
+        : `it used to point at ${anchor.danglingTarget}. restore that path, or delete the broken link first`,
     );
   }
 
@@ -59,14 +59,14 @@ export function runInit(input: InitInput): InitResult {
   if (input.ssot !== undefined) {
     ssotRoot = path.resolve(input.ssot);
     if (!isDirectory(ssotRoot)) {
-      throw envError(`指定的 SSOT 不是目录：${ssotRoot}`, '先创建该目录，或去掉 --ssot 使用当前锚点');
+      throw envError(`the given SSOT is not a directory: ${ssotRoot}`, 'create it first, or drop --ssot to use the current anchor');
     }
     // Creating the anchor is out of scope until `ssot set` exists; refuse rather
     // than silently write a config that points somewhere unwired.
     if (anchor.mode !== 'junction') {
       throw envError(
-        `锚点当前是 ${anchor.mode}，尚未接入指定 SSOT`,
-        '先运行一次不带 --ssot 的 init 建立锚点，再用 skillo ssot set 迁移',
+        `the anchor is currently ${anchor.mode} and is not wired to the given SSOT`,
+        'run init once without --ssot to create the anchor, then use skillo ssot set to migrate',
       );
     }
   } else if (anchor.mode === 'absent') {
@@ -78,7 +78,7 @@ export function runInit(input: InitInput): InitResult {
   }
 
   if (anchor.mode === 'junction' && anchor.ssotRoot !== null && !isDirectory(anchor.ssotRoot)) {
-    throw envError(`锚点目标不是目录：${anchor.ssotRoot}`);
+    throw envError(`anchor target is not a directory: ${anchor.ssotRoot}`);
   }
 
   const registered: Harness[] = [];

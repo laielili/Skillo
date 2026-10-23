@@ -131,7 +131,7 @@ describe('renderOverview content', () => {
       anchorPath: '/anchor',
       anchorNote: null,
       nativeHarnessIds: [],
-      harnessNotes: ['claude-code：skills 目录本身是链接'],
+      harnessNotes: ['claude-code: skills directory is itself a link'],
       harnesses: [harness('claude-code')],
       rows: [],
       counts: { ok: 0, undistributed: 0, problem: 0 },
@@ -140,7 +140,7 @@ describe('renderOverview content', () => {
 
     const text = renderOverview(view, { env, palette });
     const ssotIndex = text.indexOf('SSOT');
-    const noteIndex = text.indexOf('skills 目录本身是链接');
+    const noteIndex = text.indexOf('skills directory is itself a link');
     assert.ok(ssotIndex >= 0, 'SSOT line should be present');
     assert.ok(noteIndex > ssotIndex, 'harness note should appear after the SSOT line');
   });
@@ -159,6 +159,6 @@ describe('renderOverview content', () => {
     };
 
     const text = renderOverview(view, { env, palette });
-    assert.match(text, /还没有技能/);
+    assert.match(text, /no skills yet/);
   });
 });

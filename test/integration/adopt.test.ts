@@ -142,7 +142,7 @@ describe('skillo adopt', () => {
 
       const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 3);
-      assert.match(result.stdout, /冲突/);
+      assert.match(result.stdout, /conflict/);
     } finally {
       box.cleanup();
     }
@@ -157,7 +157,7 @@ describe('skillo adopt', () => {
 
       const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 3, 'conflict exit code');
-      assert.match(result.stdout, /冲突/);
+      assert.match(result.stdout, /conflict/);
 
       assert.match(box.ssotBody('grill-me'), /ssot version/, 'SSOT untouched');
       assert.match(box.harnessBody('grill-me'), /harness version/, 'harness untouched');
@@ -253,7 +253,7 @@ describe('skillo adopt', () => {
 
       const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 2);
-      assert.match(result.stderr, /skills 目录本身是链接/);
+      assert.match(result.stderr, /is itself a link/);
       assert.match(result.stderr, /doctor --fix/);
     } finally {
       box.cleanup();
@@ -276,7 +276,7 @@ describe('skillo adopt', () => {
       assert.equal(box.isLinked('alpha'), true, 'alpha still adopted');
       assert.equal(box.isLinked('gamma'), true, 'gamma still adopted');
       assert.equal(box.isLinked('beta'), false, 'beta failed');
-      assert.match(result.stdout, /失败/);
+      assert.match(result.stdout, /failed/);
     } finally {
       box.cleanup();
     }

@@ -121,11 +121,11 @@ function padColoured(plain: string, coloured: string, width: number): string {
 function groupHeader(group: SkillGroup, count: number, palette: Palette): string {
   switch (group) {
     case 'ok':
-      return palette.ok(`  ✓ 已分发 (${count})`);
+      return palette.ok(`  ✓ distributed (${count})`);
     case 'undistributed':
-      return palette.warn(`  ○ 未分发 (${count})`);
+      return palette.warn(`  ○ not distributed (${count})`);
     case 'problem':
-      return palette.error(`  ! 异常 (${count})`);
+      return palette.error(`  ! needs attention (${count})`);
   }
 }
 
@@ -176,7 +176,7 @@ export function renderOverview(view: ListView, options: RenderOptions): string {
   }
   if (view.nativeHarnessIds.length > 0) {
     lines.push(
-      `${palette.dim('      ')} ${palette.ok('≡')} ${palette.dim('原生读取锚点：')}${view.nativeHarnessIds
+      `${palette.dim('      ')} ${palette.ok('≡')} ${palette.dim('reads the anchor natively: ')}${view.nativeHarnessIds
         .map((id) => palette.accent(id))
         .join(palette.dim(', '))}`,
     );
@@ -200,7 +200,7 @@ export function renderOverview(view: ListView, options: RenderOptions): string {
   }
 
   if (view.rows.length === 0) {
-    lines.push(palette.dim('  SSOT 里还没有技能'));
+    lines.push(palette.dim('  the SSOT has no skills yet'));
     lines.push('');
   }
 
@@ -233,7 +233,7 @@ export function renderDetail(row: SkillRelations, options: RenderOptions): strin
   const idWidth = Math.max(...row.cells.map((cell) => displayWidth(cell.harnessId)), 12) + 2;
   for (const cell of row.cells) {
     if (cell.native) {
-      lines.push(`  ${padDisplay(cell.harnessId, idWidth)}${palette.ok('≡')} ${palette.dim('native — 读取锚点本身')}`);
+      lines.push(`  ${padDisplay(cell.harnessId, idWidth)}${palette.ok('≡')} ${palette.dim('native — reads the anchor itself')}`);
       continue;
     }
     lines.push(
@@ -249,7 +249,7 @@ export function renderDetail(row: SkillRelations, options: RenderOptions): strin
 export function renderMatrix(rows: readonly SkillRelations[], harnesses: readonly Harness[], options: RenderOptions): string {
   const { palette } = options;
   const active = harnesses.filter((harness) => harness.enabled);
-  if (active.length === 0) return palette.dim('  没有启用的 harness\n');
+  if (active.length === 0) return palette.dim('  no enabled harnesses\n');
 
   const idWidth = 12;
   const nameWidth = Math.max(...rows.map((row) => displayWidth(row.skill.name)), 5) + 2;

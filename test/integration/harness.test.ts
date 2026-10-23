@@ -59,9 +59,9 @@ describe('skillo harness list', () => {
 
       const result = runCli(['harness', 'list'], box.env);
       assert.equal(result.exitCode, 0);
-      assert.match(result.stdout, /已注册/);
+      assert.match(result.stdout, /registered \(/);
       assert.match(result.stdout, /claude-code/);
-      assert.match(result.stdout, /可添加/);
+      assert.match(result.stdout, /addable/);
       assert.match(result.stdout, /qoder/);
     } finally {
       box.cleanup();
@@ -90,7 +90,7 @@ describe('skillo harness add', () => {
 
       const result = runCli(['harness', 'add', 'cursor'], box.env);
       assert.equal(result.exitCode, 0, result.stderr);
-      assert.match(result.stdout, /已添加/);
+      assert.match(result.stdout, /added/);
 
       const entry = box.config().harnesses.find((harness) => harness.id === 'cursor');
       assert.ok(entry !== undefined, 'cursor should be registered');
@@ -143,7 +143,7 @@ describe('skillo harness add', () => {
       init(box);
       const result = runCli(['harness', 'add', 'claude-code'], box.env);
       assert.equal(result.exitCode, 3);
-      assert.match(result.stderr, /已注册/);
+      assert.match(result.stderr, /already registered/);
     } finally {
       box.cleanup();
     }
@@ -155,7 +155,7 @@ describe('skillo harness add', () => {
       init(box);
       const result = runCli(['harness', 'add', 'nonsense'], box.env);
       assert.equal(result.exitCode, 2);
-      assert.match(result.stderr, /需要 --path/);
+      assert.match(result.stderr, /needs --path/);
       assert.match(result.stderr, /claude-code/);
     } finally {
       box.cleanup();
@@ -168,7 +168,7 @@ describe('skillo harness add', () => {
       init(box);
       const result = runCli(['harness', 'add', 'My Tool/../x', '--path', box.root], box.env);
       assert.equal(result.exitCode, 2);
-      assert.match(result.stderr, /只能包含/);
+      assert.match(result.stderr, /may only contain/);
     } finally {
       box.cleanup();
     }
@@ -213,7 +213,7 @@ describe('native harnesses (skills dir == anchor)', () => {
 
       const list = runCli(['list'], box.env);
       assert.equal(list.exitCode, 0, list.stderr);
-      assert.match(list.stdout, /原生读取锚点/, 'top-line notice should be present');
+      assert.match(list.stdout, /reads the anchor natively/, 'top-line notice should be present');
       assert.match(list.stdout, /shared/);
 
       const payload = JSON.parse(runCli(['list', '--json'], box.env).stdout) as {
@@ -246,11 +246,11 @@ describe('native harnesses (skills dir == anchor)', () => {
 
       const doc = runCli(['doctor', 'shared'], box.env);
       assert.equal(doc.exitCode, 0, doc.stderr);
-      assert.match(doc.stdout, /原生读取锚点/);
+      assert.match(doc.stdout, /reads the anchor natively/);
 
       const link = runCli(['link', 'alpha', '--to', 'shared'], box.env);
       assert.equal(link.exitCode, 2);
-      assert.match(link.stderr, /无需链接/);
+      assert.match(link.stderr, /need no links/);
 
       // Nothing should have been written into the anchor itself.
       assert.deepEqual(fs.readdirSync(skillsRoot), ['alpha']);
@@ -314,7 +314,7 @@ describe('skillo harness remove', () => {
       init(box);
       const result = runCli(['harness', 'remove', 'ghost'], box.env);
       assert.equal(result.exitCode, 2);
-      assert.match(result.stderr, /未注册/);
+      assert.match(result.stderr, /not registered/);
     } finally {
       box.cleanup();
     }

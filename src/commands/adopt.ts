@@ -89,26 +89,26 @@ interface Context {
 export function runAdopt(input: AdoptInput): AdoptOutcome {
   const config = readConfig(input.env);
   if (config === null) {
-    throw envError('尚未初始化', '运行 skillo init 建立锚点与配置');
+    throw envError('not initialized yet', 'run skillo init to create the anchor and config');
   }
 
   const harness = config.harnesses.find((candidate) => candidate.id === input.from);
   if (harness === undefined) {
     throw usageError(
-      `未知 harness：${input.from}`,
-      `已注册：${config.harnesses.map((candidate) => candidate.id).join(', ') || '(无)'}`,
+      `unknown harness: ${input.from}`,
+      `registered: ${config.harnesses.map((candidate) => candidate.id).join(', ') || '(none)'}`,
     );
   }
 
   const anchor = detectAnchor(config.anchor);
   if (anchor.ssotRoot === null || !isDirectory(anchor.ssotRoot)) {
-    throw envError(`锚点不可用：${config.anchor}`, '先运行 skillo init');
+    throw envError(`anchor is unusable: ${config.anchor}`, 'run skillo init first');
   }
 
   if (lstatOrNull(harness.path)?.isSymbolicLink() === true) {
     throw usageError(
-      `${harness.id} 的 skills 目录本身是链接（→ ${readlinkOrNull(harness.path) ?? '?'}）`,
-      `先运行 skillo doctor --fix ${harness.id} 把它改成逐技能结构`,
+      `the skills directory of ${harness.id} is itself a link (→ ${readlinkOrNull(harness.path) ?? '?'})`,
+      `run skillo doctor --fix ${harness.id} first to turn it into a per-skill layout`,
     );
   }
 
@@ -196,13 +196,13 @@ function adoptOne(context: Context, name: string, input: AdoptInput): AdoptItem 
 
   const st = lstatOrNull(harnessPath);
   if (st === null) {
-    return { skill: name, action: 'failed', detail: '目录不存在' };
+    return { skill: name, action: 'failed', detail: 'directory does not exist' };
   }
   if (st.isSymbolicLink()) {
-    return { skill: name, action: 'skipped', detail: '已经是链接' };
+    return { skill: name, action: 'skipped', detail: 'already a link' };
   }
   if (!isFile(path.join(harnessPath, 'SKILL.md'))) {
-    return { skill: name, action: 'skipped', detail: '缺少 SKILL.md' };
+    return { skill: name, action: 'skipped', detail: 'missing SKILL.md' };
   }
 
   const harnessHash = dirHash(harnessPath, { ignore: PLATFORM_META });
@@ -219,14 +219,14 @@ function adoptOne(context: Context, name: string, input: AdoptInput): AdoptItem 
       return {
         skill: name,
         action: 'adopted-identical',
-        detail: '[dry-run] 除平台元数据外内容相同，仅替换为链接',
+        detail: '[dry-run] identical apart from platform metadata, will only be replaced by a link',
       };
     }
     const trash = trashWithRetry(harnessPath, context.trashRoot);
     return replaceWithLink(context, name, harnessPath, {
       action: 'adopted-identical',
       trashPath: trash,
-      detail: '平台元数据（_user_meta.json 等）随原目录进入 trash；来源信息可用 skillo annotate 补登记',
+      detail: 'platform metadata (_user_meta.json and similar) went to the trash with the original directory; use skillo annotate to record provenance',
     });
   }
 
@@ -238,13 +238,13 @@ function adoptOne(context: Context, name: string, input: AdoptInput): AdoptItem 
     return {
       skill: name,
       action: 'conflict',
-      detail: `内容不同（SSOT ${ssotHash.fileCount} 文件 / harness ${harnessHash.fileCount} 文件）`,
+      detail: `content differs (SSOT has ${ssotHash.fileCount} file(s), harness has ${harnessHash.fileCount})`,
     };
   }
 
   if (input.keep === 'ssot') {
     if (input.dryRun) {
-      return { skill: name, action: 'adopted-kept-ssot', detail: '[dry-run] 保留 SSOT 版本' };
+      return { skill: name, action: 'adopted-kept-ssot', detail: '[dry-run] keep the SSOT version' };
     }
     const trash = trashWithRetry(harnessPath, context.trashRoot);
     return replaceWithLink(context, name, harnessPath, {
@@ -255,7 +255,7 @@ function adoptOne(context: Context, name: string, input: AdoptInput): AdoptItem 
 
   // keep === 'harness'
   if (input.dryRun) {
-    return { skill: name, action: 'adopted-kept-harness', detail: '[dry-run] 用 harness 版本覆盖 SSOT' };
+    return { skill: name, action: 'adopted-kept-harness', detail: '[dry-run] overwrite the SSOT with the harness version' };
   }
 
   const ssotBackup = trashWithRetry(ssotPath, context.trashRoot);
@@ -265,7 +265,7 @@ function adoptOne(context: Context, name: string, input: AdoptInput): AdoptItem 
     return {
       skill: name,
       action: 'failed',
-      detail: `复制后校验失败：${copy.reason}`,
+      detail: `copy verification failed: ${copy.reason}`,
       trashPath: ssotBackup,
     };
   }
@@ -274,7 +274,7 @@ function adoptOne(context: Context, name: string, input: AdoptInput): AdoptItem 
   return replaceWithLink(context, name, harnessPath, {
     action: 'adopted-kept-harness',
     trashPath: ssotBackup,
-    detail: `harness 版本已写入 SSOT；原 SSOT 版本在 ${ssotBackup}，原 harness 目录在 ${harnessTrash}`,
+    detail: `harness version written to the SSOT; the old SSOT version is at ${ssotBackup}, the old harness directory at ${harnessTrash}`,
   });
 }
 
@@ -286,12 +286,12 @@ function adoptNew(
   input: AdoptInput,
 ): AdoptItem {
   if (input.dryRun) {
-    return { skill: name, action: 'adopted', detail: '[dry-run] 复制进 SSOT 并替换为链接' };
+    return { skill: name, action: 'adopted', detail: '[dry-run] copy into the SSOT and replace with a link' };
   }
 
   const copy = copyChecked(harnessPath, ssotPath);
   if (!copy.ok) {
-    return { skill: name, action: 'failed', detail: `复制后校验失败：${copy.reason}` };
+    return { skill: name, action: 'failed', detail: `copy verification failed: ${copy.reason}` };
   }
 
   const trash = trashWithRetry(harnessPath, context.trashRoot);
@@ -317,7 +317,7 @@ function replaceWithLink(
     return {
       skill: name,
       action: 'failed',
-      detail: `建立链接失败：${err instanceof Error ? err.message : String(err)}`,
+      detail: `failed to create link: ${err instanceof Error ? err.message : String(err)}`,
       trashPath: options.trashPath,
     };
   }
@@ -340,12 +340,12 @@ function copyChecked(source: string, destination: string): CopyCheck {
   try {
     const result = copyTree(source, destination, { ignore: PLATFORM_META });
     if (result.skippedLinks.length > 0) {
-      return { ok: false, reason: `目录内含链接，无法完整复制：${result.skippedLinks[0]}` };
+      return { ok: false, reason: `directory contains links, cannot copy completely: ${result.skippedLinks[0]}` };
     }
     const before = dirHash(source, { ignore: PLATFORM_META });
     const after = dirHash(destination, { ignore: PLATFORM_META });
     if (before.hash !== after.hash || before.fileCount !== after.fileCount) {
-      return { ok: false, reason: `哈希不一致（${before.fileCount} vs ${after.fileCount} 个文件）` };
+      return { ok: false, reason: `hash mismatch (${before.fileCount} vs ${after.fileCount} files)` };
     }
     return { ok: true };
   } catch (err) {
@@ -360,8 +360,8 @@ function runDiff(left: string, right: string): string {
   });
 
   if (result.error !== undefined && result.error !== null) {
-    return `无法运行 git diff：${result.error.message}\n  SSOT:    ${left}\n  harness: ${right}`;
+    return `could not run git diff: ${result.error.message}\n  SSOT:    ${left}\n  harness: ${right}`;
   }
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
-  return output === '' ? '(无差异)' : output;
+  return output === '' ? '(no differences)' : output;
 }

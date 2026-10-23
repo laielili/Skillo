@@ -52,13 +52,13 @@ export function runList(input: ListInput): ListOutcome {
 
   const config = readConfig(env);
   if (config === null) {
-    throw envError('尚未初始化', '运行 skillo init 建立锚点与配置');
+    throw envError('not initialized yet', 'run skillo init to create the anchor and config');
   }
 
   if (!isDirectory(config.ssotRoot)) {
     throw envError(
-      `SSOT 目录不存在：${config.ssotRoot}`,
-      '可能是移动硬盘未挂载，或路径已被移动。恢复后再试',
+      `SSOT directory does not exist: ${config.ssotRoot}`,
+      'maybe an external drive is not mounted, or the path was moved. Restore it and retry',
     );
   }
 
@@ -72,18 +72,18 @@ export function runList(input: ListInput): ListOutcome {
     case 'broken':
       anchorNote =
         anchor.danglingTarget === null
-          ? '锚点断链，目标不可达'
-          : `锚点断链，原本指向 ${anchor.danglingTarget}`;
+          ? 'anchor link is broken, target unreachable'
+          : `anchor link is broken; it used to point at ${anchor.danglingTarget}`;
       break;
     case 'real-dir':
-      anchorNote = '锚点是实体目录，未启用间接层（ssot set 需要额外确认）';
+      anchorNote = 'anchor is a real directory, no indirection layer (ssot set needs extra confirmation)';
       break;
     case 'absent':
-      anchorNote = '锚点不存在，所有链接都会失效';
+      anchorNote = 'anchor does not exist, every link will break';
       break;
     default:
       if (anchor.ssotRoot !== null && !samePath(anchor.ssotRoot, config.ssotRoot)) {
-        anchorNote = `锚点指向 ${anchor.ssotRoot}，与配置记录不一致`;
+        anchorNote = `anchor points at ${anchor.ssotRoot}, which disagrees with the config`;
       }
   }
 
@@ -104,7 +104,7 @@ export function runList(input: ListInput): ListOutcome {
   if (input.skill !== undefined) {
     const target = rows.find((row) => row.skill.name === input.skill);
     if (target === undefined) {
-      throw usageError(`找不到技能：${input.skill}`, suggest(input.skill, rows));
+      throw usageError(`skill not found: ${input.skill}`, suggest(input.skill, rows));
     }
     return {
       text: input.json === true ? jsonOf(target) : renderDetail(target, { env, palette }),
@@ -167,7 +167,7 @@ function suggest(input: string, rows: readonly SkillRelations[]): string | undef
     .slice(0, 5);
 
   if (close.length === 0) {
-    return '运行 skillo list 查看全部技能';
+    return 'run skillo list to see every skill';
   }
-  return `你是不是想找：${close.join('、')}`;
+  return `did you mean: ${close.join(', ')}`;
 }

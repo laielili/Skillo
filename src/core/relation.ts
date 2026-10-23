@@ -162,7 +162,7 @@ export function inspectHarnesses(
       notes.push({
         harnessId: harness.id,
         severity: 'warn',
-        message: `${harness.id}：目录不存在（${harness.path}）`,
+        message: `${harness.id}: directory does not exist (${harness.path})`,
       });
       continue;
     }
@@ -172,7 +172,7 @@ export function inspectHarnesses(
       notes.push({
         harnessId: harness.id,
         severity: 'warn',
-        message: `${harness.id}：skills 目录本身是链接（→ ${target ?? '无法读取目标'}），逐技能链接不适用`,
+        message: `${harness.id}: skills directory is itself a link (→ ${target ?? 'target unreadable'}), per-skill links do not apply`,
       });
     }
   }

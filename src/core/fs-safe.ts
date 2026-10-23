@@ -159,26 +159,26 @@ export function createJunction(
 ): void {
   /* ── preconditions ── */
   if (!path.isAbsolute(linkPath)) {
-    throw envError(`链接路径必须是绝对路径：${linkPath}`);
+    throw envError(`link path must be absolute: ${linkPath}`);
   }
   if (isUnc(target)) {
     throw envError(
-      `junction 不支持 UNC 路径：${target}`,
-      '把 SSOT 放到本地磁盘，或用映射盘符代替网络路径',
+      `junctions do not support UNC paths: ${target}`,
+      'put the SSOT on a local disk, or use a mapped drive letter instead of a network path',
     );
   }
 
   const targetStat = lstatOrNull(target);
   if (targetStat === null) {
-    throw envError(`链接目标不存在：${target}`);
+    throw envError(`link target does not exist: ${target}`);
   }
   if (!fs.statSync(target).isDirectory()) {
-    throw envError(`链接目标不是目录：${target}`);
+    throw envError(`link target is not a directory: ${target}`);
   }
 
   const parentDir = path.dirname(linkPath);
   if (!isDirectory(parentDir)) {
-    throw envError(`父目录不存在：${parentDir}`, '先创建 harness 目录，或运行 skillo doctor --fix');
+    throw envError(`parent directory does not exist: ${parentDir}`, 'create the harness directory first, or run skillo doctor --fix');
   }
 
   const existing = lstatOrNull(linkPath);
@@ -186,10 +186,10 @@ export function createJunction(
     const isDanglingLink = existing.isSymbolicLink() && realpathOrNull(linkPath) === null;
     if (!(isDanglingLink && options.allowReplaceBroken === true)) {
       throw conflictError(
-        `目标位置已存在：${linkPath}`,
+        `destination already occupied: ${linkPath}`,
         existing.isSymbolicLink()
-          ? '这是一个链接，但目标可达。如确需替换，用它所属的命令或 doctor --fix'
-          : '实体目录请用 skillo adopt 纳入 SSOT',
+          ? 'it is a link and its target is reachable; to replace it use the owning command or doctor --fix'
+          : 'it is a real directory; use skillo adopt to bring it into the SSOT',
       );
     }
     removeJunction(linkPath);
@@ -202,7 +202,7 @@ export function createJunction(
   try {
     const created = lstatOrNull(linkPath);
     if (created === null || !created.isSymbolicLink()) {
-      throw new Error('创建后条目不是链接（可能被降级为空目录）');
+      throw new Error('entry is not a link after creation (it may have degraded into an empty directory)');
     }
 
     // Compare FULLY RESOLVED paths on both sides. `target` is frequently
@@ -213,17 +213,17 @@ export function createJunction(
     const expected = realpathOrNull(target);
     if (resolved === null || expected === null || !samePath(resolved, expected)) {
       throw new Error(
-        `链接指向与预期不符：期望 ${expected ?? target}，实际 ${resolved ?? '(不可解析)'}`,
+        `link points somewhere unexpected: wanted ${expected ?? target}, got ${resolved ?? '(unresolvable)'}`,
       );
     }
     if (options.requireSkillMd === true && !isFile(path.join(linkPath, 'SKILL.md'))) {
-      throw new Error('链接不可读：缺少 SKILL.md');
+      throw new Error('link is unreadable: missing SKILL.md');
     }
   } catch (err) {
     rollbackLink(linkPath);
     throw envError(
-      `创建链接失败，已回滚：${linkPath}`,
-      '若是权限问题，确认目标目录可写；若是路径过长，缩短 SSOT 路径',
+      `failed to create link, rolled back: ${linkPath}`,
+      'if this is a permissions problem, check that the target directory is writable; if paths are too long, shorten the SSOT path',
       err instanceof Error ? err.message : String(err),
     );
   }
@@ -240,8 +240,8 @@ export function removeJunction(linkPath: string): void {
   if (st === null) return;
   if (!st.isSymbolicLink()) {
     throw conflictError(
-      `拒绝删除：${linkPath} 不是链接`,
-      'Skillo 只删除自己创建的链接。实体目录请手动处理',
+      `refusing to delete: ${linkPath} is not a link`,
+      'Skillo only deletes links it created. Handle real directories by hand',
     );
   }
   fs.rmdirSync(linkPath);
@@ -295,7 +295,7 @@ export interface CopyTreeOptions {
 export function copyTree(src: string, dst: string, options: CopyTreeOptions = {}): CopyTreeResult {
   const result: CopyTreeResult = { copiedFiles: 0, bytes: 0, skippedLinks: [] };
   if (!path.isAbsolute(dst)) {
-    throw envError(`复制目标必须是绝对路径：${dst}`);
+    throw envError(`copy destination must be absolute: ${dst}`);
   }
   walk(src, dst);
   return result;
@@ -365,8 +365,8 @@ export function moveToTrash(target: string, trashRoot: string): string {
     const copied = copyTree(target, dest);
     if (copied.skippedLinks.length > 0) {
       throw envError(
-        `跨盘移动时遇到无法复制的链接：${copied.skippedLinks[0]}`,
-        '目标内容仍在原处，请手动迁移',
+        `cross-volume move hit a link that could not be copied: ${copied.skippedLinks[0]}`,
+        'the original content is still in place; migrate it by hand',
       );
     }
     removeTree(target, path.dirname(target));
@@ -385,10 +385,10 @@ export function moveToTrash(target: string, trashRoot: string): string {
  */
 export function removeTree(target: string, boundary: string): void {
   if (samePath(boundary, target)) {
-    throw envError(`拒绝删除边界本身：${target}`);
+    throw envError(`refusing to delete the boundary itself: ${target}`);
   }
   if (!isInside(boundary, target)) {
-    throw envError(`拒绝删除边界之外的路径：${target}`, `边界为 ${boundary}`);
+    throw envError(`refusing to delete a path outside the boundary: ${target}`, `boundary is ${boundary}`);
   }
   fs.rmSync(target, { recursive: true, force: true });
 }

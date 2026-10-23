@@ -64,16 +64,16 @@ interface Context {
 function prepare(env: Env): Context {
   const config = readConfig(env);
   if (config === null) {
-    throw envError('尚未初始化', '运行 skillo init 建立锚点与配置');
+    throw envError('not initialized yet', 'run skillo init to create the anchor and config');
   }
 
   const anchor = detectAnchor(config.anchor);
   if (anchor.ssotRoot === null || !isDirectory(anchor.ssotRoot)) {
     throw envError(
-      `锚点不可用：${config.anchor}`,
+      `anchor is unusable: ${config.anchor}`,
       anchor.mode === 'broken'
-        ? `它指向的目标 ${anchor.danglingTarget ?? '(未知)'} 当前不可达`
-        : '先运行 skillo init',
+        ? `its target ${anchor.danglingTarget ?? '(unknown)'} is currently unreachable`
+        : 'run skillo init first',
     );
   }
 
@@ -101,8 +101,8 @@ function resolveHarnesses(context: Context, requested: string[] | null): Harness
   const native = requested.filter((id) => context.nativeIds.includes(id));
   if (native.length > 0) {
     throw usageError(
-      `${native.join(', ')} 原生读取锚点，无需链接`,
-      '这类 harness 的 skills 目录就是锚点本身，技能本来就全部可见',
+      `${native.join(', ')} read the anchor natively and need no links`,
+      'for these harnesses the skills directory IS the anchor, so every skill is already visible',
     );
   }
 
@@ -110,8 +110,8 @@ function resolveHarnesses(context: Context, requested: string[] | null): Harness
   const unknown = [...wanted].filter((id) => !context.harnesses.some((harness) => harness.id === id));
   if (unknown.length > 0) {
     throw usageError(
-      `未知 harness：${unknown.join(', ')}`,
-      `已注册：${context.harnesses.map((harness) => harness.id).join(', ') || '(无)'}`,
+      `unknown harness: ${unknown.join(', ')}`,
+      `registered: ${context.harnesses.map((harness) => harness.id).join(', ') || '(none)'}`,
     );
   }
 
@@ -125,8 +125,8 @@ function resolveSkills(context: Context, requested: string[] | null): string[] {
   const missing = requested.filter((name) => !known.has(name));
   if (missing.length > 0) {
     throw usageError(
-      `SSOT 里没有这些技能：${missing.join(', ')}`,
-      `可用技能：${context.skillNames.slice(0, 10).join(', ')}${context.skillNames.length > 10 ? ' …' : ''}`,
+      `the SSOT has no such skills: ${missing.join(', ')}`,
+      `available skills: ${context.skillNames.slice(0, 10).join(', ')}${context.skillNames.length > 10 ? ' …' : ''}`,
     );
   }
 
@@ -148,7 +148,7 @@ export function runLink(input: LinkInput): LinkOutcome {
         skill: '*',
         harness: harness.id,
         action: 'failed',
-        detail: `目录不存在：${harness.path}`,
+        detail: `directory does not exist: ${harness.path}`,
       });
       continue;
     }
@@ -180,7 +180,7 @@ function linkOne(context: Context, harness: Harness, skill: string, input: LinkI
           skill,
           harness: harness.id,
           action: 'skipped-foreign',
-          detail: '指向锚点之外，加 --replace 可重定向',
+          detail: 'points outside the anchor; add --replace to redirect it',
         };
       }
       if (!input.dryRun) removeJunction(slot);
@@ -195,7 +195,7 @@ function linkOne(context: Context, harness: Harness, skill: string, input: LinkI
         skill,
         harness: harness.id,
         action: 'conflict',
-        detail: '实体目录占位，用 skillo adopt 纳入 SSOT',
+        detail: 'a real directory is in the way; use skillo adopt to bring it into the SSOT',
       };
 
     case 'invalid':
@@ -203,7 +203,7 @@ function linkOne(context: Context, harness: Harness, skill: string, input: LinkI
         skill,
         harness: harness.id,
         action: 'refused-invalid',
-        detail: '同名文件占位，Skillo 不会删除非链接条目',
+        detail: 'a file occupies this name; Skillo never deletes entries that are not links',
       };
 
     case 'absent':
@@ -265,7 +265,7 @@ export function runUnlink(input: UnlinkInput): LinkOutcome {
             skill,
             harness: harness.id,
             action: 'conflict',
-            detail: '实体目录不是 Skillo 建的链接，未删除',
+            detail: 'a real directory, not a link created by Skillo; left untouched',
           });
           continue;
         case 'invalid':
@@ -273,7 +273,7 @@ export function runUnlink(input: UnlinkInput): LinkOutcome {
             skill,
             harness: harness.id,
             action: 'refused-invalid',
-            detail: '同名文件，未删除',
+            detail: 'a file with this name; left untouched',
           });
           continue;
         default:

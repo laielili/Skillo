@@ -28,8 +28,8 @@ export function readConfig(env: Env): SkilloConfig | null {
     parsed = JSON.parse(raw);
   } catch (err) {
     throw envError(
-      `配置文件不是合法 JSON：${file}`,
-      '修复它，或删掉后重新运行 skillo init。Skillo 不会自动覆盖',
+      `config file is not valid JSON: ${file}`,
+      'fix it, or delete it and run skillo init again. Skillo never overwrites it automatically',
       err instanceof Error ? err.message : String(err),
     );
   }
@@ -91,20 +91,20 @@ function validateConfig(value: unknown, file: string): SkilloConfig {
 
   if (obj['version'] !== 1) {
     throw envError(
-      `配置版本不受支持：${String(obj['version'])}（${file}）`,
-      '本版本只识别 version: 1。若是旧配置，请备份后重新 init',
+      `unsupported config version: ${String(obj['version'])} (${file})`,
+      'this version only understands version: 1. for an old config, back it up and init again',
     );
   }
 
   const anchor = obj['anchor'];
   const ssotRoot = obj['ssotRoot'];
   if (typeof anchor !== 'string' || typeof ssotRoot !== 'string') {
-    throw envError(`配置缺少 anchor 或 ssotRoot（${file}）`, '重新运行 skillo init 可重建配置');
+    throw envError(`config is missing anchor or ssotRoot (${file})`, 'run skillo init again to rebuild the config');
   }
 
   const rawHarnesses = obj['harnesses'];
   if (!Array.isArray(rawHarnesses)) {
-    throw envError(`配置里的 harnesses 不是数组（${file}）`);
+    throw envError(`harnesses in the config is not an array (${file})`);
   }
 
   const harnesses: Harness[] = [];

@@ -26,7 +26,7 @@ export function scanSkills(ssotRoot: string): ScanResult {
   try {
     entries = fs.readdirSync(ssotRoot).sort();
   } catch {
-    return { skills, warnings: [`无法读取 SSOT 目录：${ssotRoot}`] };
+    return { skills, warnings: [`cannot read the SSOT directory: ${ssotRoot}`] };
   }
 
   for (const name of entries) {
@@ -41,7 +41,7 @@ export function scanSkills(ssotRoot: string): ScanResult {
 
     const manifest = readTextFile(path.join(dir, 'SKILL.md'));
     if (manifest === null) {
-      warnings.push(`${name}：缺少 SKILL.md，已跳过`);
+      warnings.push(`${name}: missing SKILL.md, skipped`);
       continue;
     }
 

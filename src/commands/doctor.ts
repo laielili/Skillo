@@ -68,7 +68,7 @@ export function runDoctor(input: DoctorInput): DoctorOutcome {
   const { env } = input;
   const config = readConfig(env);
   if (config === null) {
-    throw envError('尚未初始化', '运行 skillo init 建立锚点与配置');
+    throw envError('not initialized yet', 'run skillo init to create the anchor and config');
   }
 
   const anchor = detectAnchor(config.anchor);
@@ -80,8 +80,8 @@ export function runDoctor(input: DoctorInput): DoctorOutcome {
       scope: 'anchor',
       severity: 'error',
       code: 'anchor-broken',
-      message: `锚点断链，原本指向 ${anchor.danglingTarget ?? '(无法读取)'}`,
-      detail: '恢复该路径后重试。doctor 不会重建锚点，因为那会让内容看起来消失了',
+      message: `anchor link is broken; it used to point at ${anchor.danglingTarget ?? '(unreadable)'}`,
+      detail: 'restore that path and retry. doctor will not rebuild the anchor, because that would make content look like it vanished',
       fixable: false,
     });
   } else if (anchor.mode === 'real-dir') {
@@ -89,8 +89,8 @@ export function runDoctor(input: DoctorInput): DoctorOutcome {
       scope: 'anchor',
       severity: 'warn',
       code: 'anchor-real-dir',
-      message: '锚点是实体目录，未启用间接层',
-      detail: 'ssot set 迁移时需要额外确认，且无法回滚到旧路径',
+      message: 'anchor is a real directory, no indirection layer',
+      detail: '`ssot set` will need extra confirmation and cannot roll back to the old path',
       fixable: false,
     });
   } else if (anchor.mode === 'junction') {
@@ -98,7 +98,7 @@ export function runDoctor(input: DoctorInput): DoctorOutcome {
       scope: 'anchor',
       severity: 'ok',
       code: 'anchor-ok',
-      message: `锚点 junction → ${anchor.ssotRoot ?? '?'}`,
+      message: `anchor junction → ${anchor.ssotRoot ?? '?'}`,
       fixable: false,
     });
   }
@@ -119,7 +119,7 @@ export function runDoctor(input: DoctorInput): DoctorOutcome {
         scope: harness.id,
         severity: 'ok',
         code: 'harness-native',
-        message: '原生读取锚点，全部技能已可见',
+        message: 'reads the anchor natively, every skill is already visible',
         fixable: false,
       });
       continue;
@@ -212,7 +212,7 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
       scope: harness.id,
       severity: 'ok',
       code: 'harness-ok',
-      message: '已禁用，跳过',
+      message: 'disabled, skipped',
       fixable: false,
     });
     return out;
@@ -224,7 +224,7 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
       scope: harness.id,
       severity: 'warn',
       code: 'harness-missing',
-      message: `目录不存在：${harness.path}`,
+      message: `directory does not exist: ${harness.path}`,
       fixable: true,
     });
     return out;
@@ -236,8 +236,8 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
       scope: harness.id,
       severity: 'error',
       code: 'harness-whole-dir',
-      message: `skills 目录本身是链接（→ ${target ?? '无法读取'}）`,
-      detail: '逐技能链接无法生效；--fix 会拆掉它并按技能重建，空窗期内该工具读不到技能',
+      message: `skills directory is itself a link (→ ${target ?? 'unreadable'})`,
+      detail: 'per-skill links cannot work here; --fix detaches it and rebuilds per skill, during which the tool briefly sees no skills',
       fixable: true,
     });
     return out;
@@ -262,7 +262,7 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
       scope: harness.id,
       severity: 'error',
       code: 'links-broken',
-      message: `${broken.length} 个链接断链`,
+      message: `${broken.length} broken link(s)`,
       detail: broken.slice(0, 8).join(', ') + (broken.length > 8 ? ' …' : ''),
       fixable: true,
       subjects: broken,
@@ -274,8 +274,8 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
       scope: harness.id,
       severity: 'warn',
       code: 'links-foreign',
-      message: `${foreign.length} 个链接绕过锚点`,
-      detail: `${foreign.slice(0, 8).join(', ')}${foreign.length > 8 ? ' …' : ''}（SSOT 迁移时会失效）`,
+      message: `${foreign.length} link(s) bypass the anchor`,
+      detail: `${foreign.slice(0, 8).join(', ')}${foreign.length > 8 ? ' …' : ''} (they will break when the SSOT moves)`,
       fixable: true,
       subjects: foreign,
     });
@@ -286,8 +286,8 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
       scope: harness.id,
       severity: 'error',
       code: 'links-conflict',
-      message: `${conflict.length} 个同名实体目录占位`,
-      detail: `需要 skillo adopt 纳入 SSOT，doctor 不会删除它们：${conflict.slice(0, 8).join(', ')}`,
+      message: `${conflict.length} real director(ies) occupying the same name`,
+      detail: `they need \`skillo adopt\` to enter the SSOT; doctor will not delete them: ${conflict.slice(0, 8).join(', ')}`,
       fixable: false,
       subjects: conflict,
     });
@@ -298,8 +298,8 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
       scope: harness.id,
       severity: 'error',
       code: 'links-invalid',
-      message: `${invalid.length} 个同名文件占位`,
-      detail: `不是目录，Skillo 不会删除：${invalid.slice(0, 8).join(', ')}`,
+      message: `${invalid.length} file(s) occupying the same name`,
+      detail: `not a directory; Skillo will not delete them: ${invalid.slice(0, 8).join(', ')}`,
       fixable: false,
       subjects: invalid,
     });
@@ -310,7 +310,7 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
       scope: harness.id,
       severity: 'ok',
       code: 'links-undistributed',
-      message: `${undistributed} 个技能未分发到此`,
+      message: `${undistributed} skill(s) not distributed here`,
       fixable: false,
     });
   }
@@ -320,7 +320,7 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
       scope: harness.id,
       severity: 'ok',
       code: 'harness-ok',
-      message: '正常',
+      message: 'healthy',
       fixable: false,
     });
   }
@@ -344,8 +344,8 @@ function detachWholeDir(harness: Harness): void {
     ensureDir(harness.path);
   } catch (err) {
     throw envError(
-      `拆掉整目录链接后无法创建目录：${harness.path}`,
-      '原链接指向的目标仍在原处，请手动重建该目录后再运行 link',
+      `could not create the directory after detaching the whole-directory link: ${harness.path}`,
+      'the old link target is still where it was; recreate that directory by hand, then run link again',
       err instanceof Error ? err.message : String(err),
     );
   }

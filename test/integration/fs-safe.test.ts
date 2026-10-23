@@ -112,7 +112,7 @@ describe('createJunction', () => {
       ensureDir(slot);
       fs.writeFileSync(path.join(slot, 'keep.txt'), 'precious', 'utf8');
 
-      assert.throws(() => createJunction(source, slot), /已存在/);
+      assert.throws(() => createJunction(source, slot), /already occupied/);
       // The occupant must be untouched.
       assert.equal(fs.readFileSync(path.join(slot, 'keep.txt'), 'utf8'), 'precious');
     } finally {
@@ -128,7 +128,7 @@ describe('createJunction', () => {
       const slot = box.slot('alpha');
       createJunction(a, slot);
 
-      assert.throws(() => createJunction(b, slot), /已存在/);
+      assert.throws(() => createJunction(b, slot), /already occupied/);
       assert.equal(realpathOrNull(slot), realpathOrNull(a));
     } finally {
       box.cleanup();
@@ -160,7 +160,7 @@ describe('createJunction', () => {
   test('rejects a missing target', () => {
     const box = sandbox();
     try {
-      assert.throws(() => createJunction(path.join(box.ssot, 'ghost'), box.slot('ghost')), /不存在/);
+      assert.throws(() => createJunction(path.join(box.ssot, 'ghost'), box.slot('ghost')), /does not exist/);
     } finally {
       box.cleanup();
     }
@@ -171,7 +171,7 @@ describe('createJunction', () => {
     try {
       const source = box.makeSkill('alpha');
       const orphan = path.join(box.root, 'no-such-dir', 'alpha');
-      assert.throws(() => createJunction(source, orphan), /父目录/);
+      assert.throws(() => createJunction(source, orphan), /parent directory/);
     } finally {
       box.cleanup();
     }
@@ -181,7 +181,7 @@ describe('createJunction', () => {
     const box = sandbox();
     try {
       const source = box.makeSkill('alpha');
-      assert.throws(() => createJunction(source, 'relative-slot'), /绝对路径/);
+      assert.throws(() => createJunction(source, 'relative-slot'), /must be absolute/);
     } finally {
       box.cleanup();
     }
@@ -198,7 +198,7 @@ describe('createJunction', () => {
       fs.mkdirSync(slot);
 
       assert.equal(classifyEntry(slot, { anchorReal: box.ssotReal }), 'conflict');
-      assert.throws(() => createJunction(source, slot), /已存在/);
+      assert.throws(() => createJunction(source, slot), /already occupied/);
       assert.ok(lstatOrNull(slot)?.isDirectory(), 'empty dir must survive the refusal');
     } finally {
       box.cleanup();
@@ -212,7 +212,7 @@ describe('createJunction', () => {
       fs.mkdirSync(hollow, { recursive: true });
       const slot = box.slot('hollow');
 
-      assert.throws(() => createJunction(hollow, slot, { requireSkillMd: true }), /已回滚/);
+      assert.throws(() => createJunction(hollow, slot, { requireSkillMd: true }), /rolled back/);
       assert.equal(lstatOrNull(slot), null, 'failed link must be rolled back, not left behind');
     } finally {
       box.cleanup();
@@ -257,7 +257,7 @@ describe('removeJunction', () => {
       ensureDir(slot);
       fs.writeFileSync(path.join(slot, 'SKILL.md'), 'x', 'utf8');
 
-      assert.throws(() => removeJunction(slot), /拒绝删除/);
+      assert.throws(() => removeJunction(slot), /refusing to delete/);
       assert.ok(isFile(path.join(slot, 'SKILL.md')), 'occupant must survive the refusal');
     } finally {
       box.cleanup();

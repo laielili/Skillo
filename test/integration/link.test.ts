@@ -212,7 +212,7 @@ describe('skillo link', () => {
 
       const result = runCli(['link', 'ghost'], box.env);
       assert.equal(result.exitCode, 2);
-      assert.match(result.stderr, /没有这些技能/);
+      assert.match(result.stderr, /no such skills/);
     } finally {
       box.cleanup();
     }
@@ -268,12 +268,12 @@ describe('skillo doctor', () => {
       init(box);
 
       const result = runCli(['doctor'], box.env);
-      assert.match(result.stdout, /skills 目录本身是链接/);
-      assert.match(result.stdout, /harness-whole-dir|逐技能链接无法生效/);
+      assert.match(result.stdout, /skills directory is itself a link/);
+      assert.match(result.stdout, /harness-whole-dir|per-skill links cannot work/);
 
       // list should attribute the cause, not just show N conflicts.
       const listOutput = runCli(['list'], box.env);
-      assert.match(listOutput.stdout, /skills 目录本身是链接/);
+      assert.match(listOutput.stdout, /skills directory is itself a link/);
     } finally {
       box.cleanup();
     }
@@ -324,7 +324,7 @@ describe('skillo doctor', () => {
       fs.writeFileSync(path.join(occupied, 'keep.txt'), 'precious', 'utf8');
 
       const result = runCli(['doctor', '--fix'], box.env);
-      assert.match(result.stdout, /同名实体目录/);
+      assert.match(result.stdout, /real director/);
       assert.equal(fs.readFileSync(path.join(occupied, 'keep.txt'), 'utf8'), 'precious');
     } finally {
       box.cleanup();
@@ -399,9 +399,9 @@ describe('skillo doctor', () => {
       fs.writeFileSync(path.join(box.harness('claude-code'), 'markitdown'), 'not a dir', 'utf8');
 
       const result = runCli(['doctor'], box.env);
-      assert.match(result.stdout, /同名文件占位/);
+      assert.match(result.stdout, /occupying the same name/);
       assert.match(result.stdout, /markitdown/);
-      assert.match(result.stdout, /不会删除/);
+      assert.match(result.stdout, /will not delete/);
     } finally {
       box.cleanup();
     }

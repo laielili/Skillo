@@ -30,35 +30,35 @@ export const VERSION = '0.1.0';
 
 export const HELP = `skillo — one skill, one source of truth, every agentic tool
 
-用法
+USAGE
   skillo <command> [options]
 
-命令
-  init                    首次配置：建立锚点、探测已安装的 harness
-  list [skill]          查看技能在各 harness 中的分布
-  link [skill...]         把技能分发到 harness
-  unlink [skill...]       撤销分发
-  doctor [harness]        诊断并修复
-  harness [list]          查看已注册 / 可添加的 harness
-  harness add <id>        添加 harness（内置预设或 --path 自定义）
-  harness remove <id>     取消注册
-  adopt                   把 harness 里的实体技能纳入 SSOT   (M4)
-  ssot set <path>         迁移 SSOT 到新位置                 (M6)
-  annotate                补登记技能来源                     (M7)
+COMMANDS
+  init                    First-time setup: create the anchor, detect harnesses
+  list [skill]            Show how skills are distributed across harnesses
+  link [skill...]         Distribute skills to harnesses
+  unlink [skill...]       Remove distribution
+  doctor [harness]        Diagnose and repair
+  harness [list]          Show registered / addable harnesses
+  harness add <id>        Register a harness (built-in preset or --path)
+  harness remove <id>     Unregister a harness
+  adopt                   Adopt real skill directories into the SSOT   (M4)
+  ssot set <path>         Move the SSOT to a new location              (M6)
+  annotate                Backfill skill provenance                    (M7)
 
-选项
-  --to <ids|all>          link 的目标 harness（默认 all）
-  --from <ids|all>        unlink / adopt 的来源 harness
-  --path <dir>            harness add 的目录（省略则用内置预设）
-  --name <label>          harness 的显示名
-  --all                   作用于全部技能
-  --replace               把绕过锚点的链接重定向（link）
-  --fix                   执行修复（doctor）
-  --dry-run               只显示计划，不改动任何东西
-  --json                  机器可读输出
-  --matrix                技能 × harness 矩阵（list）
-  -h, --help              显示帮助
-  -v, --version           显示版本`;
+OPTIONS
+  --to <ids|all>          Target harnesses for link (default: all)
+  --from <ids|all>        Source harnesses for unlink / adopt
+  --path <dir>            Directory for harness add (defaults to preset)
+  --name <label>          Display name for the harness
+  --all                   Apply to every skill
+  --replace               Redirect links that bypass the anchor (link)
+  --fix                   Apply repairs (doctor)
+  --dry-run               Print the plan, change nothing
+  --json                  Machine-readable output
+  --matrix                Skill x harness matrix (list)
+  -h, --help              Show help
+  -v, --version           Show version`;
 
 export function runCli(argv: readonly string[], env: Env): RunOutcome {
   const args = parseArgs(argv);
@@ -102,11 +102,11 @@ function dispatch(command: string, args: ParsedArgs, env: Env): RunOutcome {
     case 'harness':
       return harnessCommand(args, env);
     case 'annotate':
-      throw usageError('`annotate` 尚未实现', '当前版本包含 init / list / link / unlink / doctor / adopt');
+      throw usageError('`annotate` is not implemented yet', 'this version ships init / list / link / unlink / doctor / adopt');
     case 'ssot':
-      throw usageError('`ssot set` 尚未实现', '当前版本包含 init / list / link / unlink / doctor / adopt');
+      throw usageError('`ssot set` is not implemented yet', 'this version ships init / list / link / unlink / doctor / adopt');
     default:
-      throw usageError(`未知命令：${command}`, '运行 skillo --help 查看可用命令');
+      throw usageError(`unknown command: ${command}`, 'run skillo --help to see available commands');
   }
 }
 
@@ -118,32 +118,32 @@ function initCommand(args: ParsedArgs, env: Env): RunOutcome {
   const palette = makePalette(colourEnabled(process.stdout));
 
   const lines: string[] = [];
-  lines.push(`${palette.ok('✓')} 已初始化`);
-  lines.push(`  ${palette.dim('锚点')}   ${toDisplay(result.config.anchor, env)}`);
+  lines.push(`${palette.ok('✓')} initialized`);
+  lines.push(`  ${palette.dim('Anchor')} ${toDisplay(result.config.anchor, env)}`);
 
   const { anchor } = result;
   if (anchor.mode === 'junction' && anchor.ssotRoot !== null) {
-    lines.push(`  ${palette.dim('指向')}   ${toDisplay(anchor.ssotRoot, env)}`);
+    lines.push(`  ${palette.dim('Points')} ${toDisplay(anchor.ssotRoot, env)}`);
   }
-  lines.push(`  ${palette.dim('SSOT')}   ${toDisplay(result.config.ssotRoot, env)}`);
+  lines.push(`  ${palette.dim('SSOT  ')} ${toDisplay(result.config.ssotRoot, env)}`);
   lines.push('');
-  lines.push(`  ${palette.dim('已注册')} ${result.registered.length} 个 harness`);
+  lines.push(`  ${palette.dim('Registered')} ${result.registered.length} harness(es)`);
 
   for (const harness of result.registered) {
     lines.push(`    ${palette.accent(harness.id)} ${palette.dim(harness.path)}`);
   }
 
   if (result.skipped.length > 0) {
-    lines.push(`  ${palette.dim(`未安装 ${result.skipped.length} 个：${result.skipped.join(', ')}`)}`);
+    lines.push(`  ${palette.dim(`${result.skipped.length} not installed: ${result.skipped.join(', ')}`)}`);
   }
   if (result.nativeShared.length > 0) {
     lines.push(
-      `  ${palette.ok('≡')} ${palette.dim('原生读取锚点，无需注册：')}${result.nativeShared.join(', ')}`,
+      `  ${palette.ok('≡')} ${palette.dim('read the anchor natively, no registration needed: ')}${result.nativeShared.join(', ')}`,
     );
   }
 
   lines.push('');
-  lines.push(`  ${palette.dim('下一步')} skillo list`);
+  lines.push(`  ${palette.dim('Next')} skillo list`);
 
   return { stdout: `${lines.join('\n')}\n`, stderr: '', exitCode: EXIT.OK };
 }
@@ -251,16 +251,16 @@ function renderLinkItems(items: readonly LinkItem[], palette: Palette, title: st
   }
 
   if (items.length === 0) {
-    lines.push(palette.dim('  没有需要处理的项'));
+    lines.push(palette.dim('  nothing to do'));
   }
 
   lines.push('');
   const summary = [...totals.entries()].map(([action, count]) => `${count} ${action}`).join(' · ');
-  lines.push(palette.dim(`  合计 ${summary === '' ? '无变化' : summary}`));
+  lines.push(palette.dim(`  total ${summary === '' ? 'no changes' : summary}`));
 
   if ((totals.get('conflict') ?? 0) > 0) {
     lines.push('');
-    lines.push(palette.dim('  实体目录需要 skillo adopt 纳入 SSOT（doctor 不会删除它们）'));
+    lines.push(palette.dim('  real directories need `skillo adopt` to enter the SSOT (doctor never deletes them)'));
   }
 
   return `${lines.join('\n')}\n`;
@@ -271,12 +271,12 @@ function renderLinkItems(items: readonly LinkItem[], palette: Palette, title: st
 function adoptCommand(args: ParsedArgs, env: Env): RunOutcome {
   const from = stringFlag(args, 'from');
   if (from === undefined) {
-    throw usageError('缺少 --from <harness>', '例：skillo adopt --from workbuddy');
+    throw usageError('missing --from <harness>', 'example: skillo adopt --from workbuddy');
   }
 
   const keepRaw = stringFlag(args, 'keep');
   if (keepRaw !== undefined && keepRaw !== 'ssot' && keepRaw !== 'harness') {
-    throw usageError(`--keep 只能是 ssot 或 harness，收到：${keepRaw}`);
+    throw usageError(`--keep must be either ssot or harness, got: ${keepRaw}`);
   }
 
   const dryRun = hasFlag(args, 'dry-run');
@@ -308,7 +308,7 @@ function renderAdopt(
   lines.push('');
 
   if (items.length === 0) {
-    lines.push(palette.dim('  没有可纳入的实体目录'));
+    lines.push(palette.dim('  no real directories to adopt'));
     return `${lines.join('\n')}\n`;
   }
 
@@ -319,7 +319,7 @@ function renderAdopt(
   const failed = items.filter((item) => item.action === 'failed');
 
   if (done.length > 0) {
-    lines.push(palette.ok(`  ✓ 已纳入 (${done.length})`));
+    lines.push(palette.ok(`  ✓ adopted (${done.length})`));
     for (const item of done) {
       lines.push(`    ${padDisplay(item.skill, 28)}${palette.dim(item.action)}`);
       if (item.detail !== undefined) lines.push(`      ${palette.dim(item.detail)}`);
@@ -328,12 +328,12 @@ function renderAdopt(
   }
 
   if (conflicts.length > 0) {
-    lines.push(palette.error(`  ! 冲突 (${conflicts.length})  需指定 --keep 才能继续`));
+    lines.push(palette.error(`  ! conflict (${conflicts.length})  pass --keep to continue`));
     for (const item of conflicts) {
       lines.push(`    ${padDisplay(item.skill, 28)}${palette.dim(item.detail ?? '')}`);
     }
     lines.push('');
-    lines.push(palette.dim('  冲突处置'));
+    lines.push(palette.dim('  to resolve a conflict'));
     const first = conflicts[0]?.skill ?? '<skill>';
     lines.push(palette.dim(`    skillo adopt --from ${from} ${first} --diff`));
     lines.push(palette.dim(`    skillo adopt --from ${from} ${first} --keep ssot`));
@@ -350,7 +350,7 @@ function renderAdopt(
   }
 
   if (skipped.length > 0) {
-    lines.push(palette.dim(`  · 跳过 ${skipped.length} 个`));
+    lines.push(palette.dim(`  · skipped ${skipped.length}`));
     for (const item of skipped) {
       lines.push(palette.dim(`    ${item.skill} — ${item.detail ?? ''}`));
     }
@@ -358,7 +358,7 @@ function renderAdopt(
   }
 
   if (failed.length > 0) {
-    lines.push(palette.error(`  ✗ 失败 ${failed.length} 个`));
+    lines.push(palette.error(`  ✗ failed ${failed.length}`));
     for (const item of failed) {
       lines.push(`    ${item.skill} — ${item.detail ?? ''}`);
     }
@@ -367,7 +367,7 @@ function renderAdopt(
 
   const trashPaths = items.filter((item) => item.trashPath !== undefined);
   if (trashPaths.length > 0) {
-    lines.push(palette.dim('  被替换的原目录已移入 ~/.skillo/.trash/，需要时可手动取回'));
+    lines.push(palette.dim('  replaced directories were moved to ~/.skillo/.trash/ and can be recovered by hand'));
   }
 
   return `${lines.join('\n')}\n`;
@@ -395,8 +395,8 @@ function harnessCommand(args: ParsedArgs, env: Env): RunOutcome {
       const id = args.positionals[1];
       if (id === undefined) {
         throw usageError(
-          '缺少 harness id',
-          '例：skillo harness add cursor   或   skillo harness add my-tool --path D:\\tools\\skills',
+          'missing harness id',
+          'example: skillo harness add cursor   or   skillo harness add my-tool --path D:\\tools\\skills',
         );
       }
       const explicitPath = stringFlag(args, 'path');
@@ -409,29 +409,29 @@ function harnessCommand(args: ParsedArgs, env: Env): RunOutcome {
       });
 
       const lines = [
-        `${palette.ok('✓')} 已添加 ${palette.accent(result.harness.id)} → ${toDisplay(result.harness.path, env)}`,
+        `${palette.ok('✓')} added ${palette.accent(result.harness.id)} → ${toDisplay(result.harness.path, env)}`,
       ];
       if (result.createdDir) {
-        lines.push(palette.dim('  目录原本不存在，已创建'));
+        lines.push(palette.dim('  the directory did not exist and was created'));
       }
       if (result.native) {
-        lines.push(palette.dim('  该 harness 原生读取锚点，全部技能已可见，无需 link'));
+        lines.push(palette.dim('  reads the anchor natively: every skill is already visible, no link needed'));
       } else {
-        lines.push(palette.dim(`  下一步 skillo link --all --to ${result.harness.id}`));
+        lines.push(palette.dim(`  next: skillo link --all --to ${result.harness.id}`));
       }
       return { stdout: `${lines.join('\n')}\n`, stderr: '', exitCode: EXIT.OK };
     }
 
     case 'remove': {
       const id = args.positionals[1];
-      if (id === undefined) throw usageError('缺少 harness id', '例：skillo harness remove cursor');
+      if (id === undefined) throw usageError('missing harness id', 'example: skillo harness remove cursor');
 
       const result = runHarnessRemove(env, id);
-      const lines = [`${palette.ok('✓')} 已移除 ${result.harness.id}（仅取消注册，未改动文件）`];
+      const lines = [`${palette.ok('✓')} removed ${result.harness.id} (unregistered only, no files touched)`];
       if (result.leftoverEntries > 0) {
         lines.push(
           palette.dim(
-            `  ${toDisplay(result.harness.path, env)} 里还有 ${result.leftoverEntries} 个条目，需要时手动清理`,
+            `  ${toDisplay(result.harness.path, env)} still holds ${result.leftoverEntries} entries; clean them up by hand if you want`,
           ),
         );
       }
@@ -439,7 +439,7 @@ function harnessCommand(args: ParsedArgs, env: Env): RunOutcome {
     }
 
     default:
-      throw usageError(`未知子命令：harness ${sub}`, '可用：list / add / remove');
+      throw usageError(`unknown subcommand: harness ${sub}`, 'available: list / add / remove');
   }
 }
 
@@ -449,7 +449,7 @@ function renderHarnessList(env: Env, palette: Palette): string {
   lines.push(palette.bold('harness'));
   lines.push('');
 
-  lines.push(palette.dim(`  已注册 (${result.registered.length})`));
+  lines.push(palette.dim(`  registered (${result.registered.length})`));
   for (const probe of result.registered) {
     const marker = !probe.exists
       ? palette.error('✗')
@@ -461,11 +461,11 @@ function renderHarnessList(env: Env, palette: Palette): string {
     // For a native harness, the directory being a link is expected — it IS the
     // anchor. Warning about it would contradict the `≡` marker.
     const note = !probe.exists
-      ? palette.error('目录不存在')
+      ? palette.error('directory missing')
       : probe.native
-        ? palette.dim('原生读取锚点')
+        ? palette.dim('reads the anchor natively')
         : probe.isLink
-          ? palette.warn(`目录本身是链接 → ${probe.linkTarget ?? '?'}`)
+          ? palette.warn(`directory itself is a link → ${probe.linkTarget ?? '?'}`)
           : '';
     lines.push(
       `    ${marker} ${padDisplay(probe.harness.id, 18)}${palette.dim(toDisplay(probe.harness.path, env))} ${note}`,
@@ -474,7 +474,7 @@ function renderHarnessList(env: Env, palette: Palette): string {
 
   if (result.addable.length > 0) {
     lines.push('');
-    lines.push(palette.dim(`  可添加 (${result.addable.length})  目录已存在但未注册`));
+    lines.push(palette.dim(`  addable (${result.addable.length})  directory exists but is not registered`));
     for (const entry of result.addable) {
       lines.push(`    ${padDisplay(entry.id, 18)}${palette.dim(toDisplay(entry.path, env))}`);
     }
@@ -483,19 +483,19 @@ function renderHarnessList(env: Env, palette: Palette): string {
 
   if (result.nativePresets.length > 0) {
     lines.push('');
-    lines.push(palette.dim(`  原生读取锚点 (${result.nativePresets.length})  无需添加，已能看到全部技能`));
+    lines.push(palette.dim(`  read the anchor natively (${result.nativePresets.length})  nothing to add, all skills already visible`));
     lines.push(palette.dim(`    ${result.nativePresets.join(', ')}`));
   }
 
   if (result.absent.length > 0) {
     lines.push('');
-    lines.push(palette.dim(`  内置预设但本机未安装 (${result.absent.length})`));
+    lines.push(palette.dim(`  built-in presets not installed on this machine (${result.absent.length})`));
     lines.push(palette.dim(`    ${result.absent.join(', ')}`));
   }
 
   lines.push('');
-  lines.push(palette.dim('  自定义：skillo harness add <id> --path <目录>'));
-  lines.push(palette.dim('  内置预设共 13 个，用 skillo harness add <id> 直接添加'));
+  lines.push(palette.dim('  custom: skillo harness add <id> --path <dir>'));
+  lines.push(palette.dim('  14 built-in presets are available; add one with skillo harness add <id>'));
 
   return `${lines.join('\n')}\n`;
 }
@@ -521,14 +521,14 @@ function doctorCommand(args: ParsedArgs, env: Env): RunOutcome {
 
   if (outcome.repaired.length > 0) {
     lines.push('');
-    lines.push(`${palette.ok('✓')} 已修复：${outcome.repaired.join(', ')}`);
+    lines.push(`${palette.ok('✓')} repaired: ${outcome.repaired.join(', ')}`);
     if (outcome.relinked > 0) {
-      lines.push(palette.dim(`  重建 ${outcome.relinked} 个链接`));
+      lines.push(palette.dim(`  rebuilt ${outcome.relinked} link(s)`));
     }
-    lines.push(palette.dim('  运行 skillo list 确认结果'));
+    lines.push(palette.dim('  run skillo list to confirm'));
   } else if (outcome.findings.some((finding) => finding.fixable)) {
     lines.push('');
-    lines.push(palette.dim('  有可修复项：运行 skillo doctor --fix'));
+    lines.push(palette.dim('  repairable issues found: run skillo doctor --fix'));
   }
 
   return { stdout: `${lines.join('\n')}\n`, stderr: '', exitCode: outcome.exitCode };

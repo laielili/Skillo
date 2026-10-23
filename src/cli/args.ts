@@ -85,7 +85,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       } else if (short === 'a') {
         flags.set('to', 'all');
       } else {
-        errors.push(`未知选项：-${short}`);
+        errors.push(`unknown option: -${short}`);
       }
       continue;
     }

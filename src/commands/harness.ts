@@ -40,20 +40,20 @@ export interface HarnessAddResult {
 export function runHarnessAdd(input: HarnessAddInput): HarnessAddResult {
   const config = readConfig(input.env);
   if (config === null) {
-    throw envError('尚未初始化', '运行 skillo init 建立锚点与配置');
+    throw envError('not initialized yet', 'run skillo init to create the anchor and config');
   }
 
   if (!ID_PATTERN.test(input.id)) {
     throw usageError(
-      `harness id 只能包含小写字母、数字和连字符：${input.id}`,
-      '例：claude-code / my-tool',
+      `harness id may only contain lowercase letters, digits and hyphens: ${input.id}`,
+      'example: claude-code / my-tool',
     );
   }
 
   if (config.harnesses.some((harness) => harness.id === input.id)) {
     throw conflictError(
-      `harness 已注册：${input.id}`,
-      `先 skillo harness remove ${input.id}，或改配置文件里的 path`,
+      `harness already registered: ${input.id}`,
+      `run skillo harness remove ${input.id} first, or change the path in the config file`,
     );
   }
 
@@ -62,19 +62,19 @@ export function runHarnessAdd(input: HarnessAddInput): HarnessAddResult {
 
   if (rawPath === undefined) {
     throw usageError(
-      `未知 harness：${input.id}`,
-      `自定义 harness 需要 --path。内置预设：${HARNESS_PRESETS.map((entry) => entry.id).join(', ')}`,
+      `unknown harness: ${input.id}`,
+      `a custom harness needs --path. built-in presets: ${HARNESS_PRESETS.map((entry) => entry.id).join(', ')}`,
     );
   }
 
   const target = expandHome(rawPath, input.env.home);
   if (!path.isAbsolute(target)) {
-    throw usageError(`路径必须是绝对路径：${target}`);
+    throw usageError(`path must be absolute: ${target}`);
   }
   if (isUnc(target)) {
     throw usageError(
-      `harness 路径不能是网络路径：${target}`,
-      '链接需要建在该目录内部，而 junction 不支持 UNC 目标',
+      `harness path cannot be a network path: ${target}`,
+      'links have to be created inside that directory, and junctions do not support UNC targets',
     );
   }
 
@@ -114,20 +114,20 @@ export interface HarnessRemoveResult {
 export function runHarnessRemove(env: Env, id: string): HarnessRemoveResult {
   const config = readConfig(env);
   if (config === null) {
-    throw envError('尚未初始化', '运行 skillo init 建立锚点与配置');
+    throw envError('not initialized yet', 'run skillo init to create the anchor and config');
   }
 
   const index = config.harnesses.findIndex((harness) => harness.id === id);
   if (index < 0) {
     throw usageError(
-      `未注册的 harness：${id}`,
-      `已注册：${config.harnesses.map((harness) => harness.id).join(', ') || '(无)'}`,
+      `harness not registered: ${id}`,
+      `registered: ${config.harnesses.map((harness) => harness.id).join(', ') || '(none)'}`,
     );
   }
 
   const [harness] = config.harnesses.splice(index, 1);
   if (harness === undefined) {
-    throw usageError(`未注册的 harness：${id}`);
+    throw usageError(`harness not registered: ${id}`);
   }
 
   writeConfig(env, config);

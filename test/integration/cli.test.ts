@@ -98,7 +98,7 @@ describe('skillo init', () => {
       const result = runCli(['init'], home.env);
 
       assert.equal(result.exitCode, 0);
-      assert.match(result.stdout, /已初始化/);
+      assert.match(result.stdout, /initialized/);
 
       const configPath = path.join(home.env.home, '.skillo', 'config.json');
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
@@ -117,7 +117,7 @@ describe('skillo init', () => {
         ['claude-code', 'workbuddy'],
       );
       assert.equal(config.harnesses.every((harness) => harness.preset === 'builtin'), true);
-      assert.match(result.stdout, /原生读取锚点/, 'native shares should be announced');
+      assert.match(result.stdout, /read the anchor natively/, 'native shares should be announced');
     } finally {
       home.cleanup();
     }
@@ -127,7 +127,7 @@ describe('skillo init', () => {
     const home = makeHome();
     try {
       const result = runCli(['init'], home.env);
-      assert.match(result.stdout, /未安装/);
+      assert.match(result.stdout, /not installed/);
     } finally {
       home.cleanup();
     }
@@ -149,7 +149,7 @@ describe('skillo init', () => {
       const result = runCli(['init'], { home, cwd: root });
 
       assert.equal(result.exitCode, 4);
-      assert.match(result.stderr, /不可达/);
+      assert.match(result.stderr, /unreachable/);
       // The dangling link must survive: deleting it would erase the only clue
       // about where the SSOT used to live.
       assert.ok(fs.lstatSync(anchor) !== null);
@@ -167,7 +167,7 @@ describe('skillo list', () => {
     try {
       const result = runCli(['list'], home.env);
       assert.equal(result.exitCode, 4);
-      assert.match(result.stderr, /尚未初始化/);
+      assert.match(result.stderr, /not initialized/);
     } finally {
       home.cleanup();
     }
@@ -258,7 +258,7 @@ describe('skillo list', () => {
 
       const result = runCli(['list'], home.env);
       assert.equal(result.exitCode, 0);
-      assert.match(result.stdout, /未分发/);
+      assert.match(result.stdout, /not distributed/);
       assert.match(result.stdout, /alpha/);
       assert.match(result.stdout, /beta/);
     } finally {
@@ -293,7 +293,7 @@ describe('skillo list', () => {
 
       const result = runCli(['list', 'grill'], home.env);
       assert.equal(result.exitCode, 2);
-      assert.match(result.stderr, /找不到技能/);
+      assert.match(result.stderr, /skill not found/);
     } finally {
       home.cleanup();
     }
@@ -337,7 +337,7 @@ describe('skillo list', () => {
       const result = runCli(['list'], home.env);
       // SSOT is gone, so list must fail loudly rather than show an empty list.
       assert.equal(result.exitCode, 4);
-      assert.match(result.stderr, /SSOT 目录不存在/);
+      assert.match(result.stderr, /SSOT directory does not exist/);
     } finally {
       home.cleanup();
     }
@@ -375,7 +375,7 @@ describe('cli surface', () => {
     try {
       const result = runCli(['frobnicate'], home.env);
       assert.equal(result.exitCode, 2);
-      assert.match(result.stderr, /未知命令/);
+      assert.match(result.stderr, /unknown command/);
     } finally {
       home.cleanup();
     }
@@ -386,7 +386,7 @@ describe('cli surface', () => {
     try {
       const result = runCli(['annotate', 'grill-me', '--source', 'local'], home.env);
       assert.equal(result.exitCode, 2);
-      assert.match(result.stderr, /尚未实现/);
+      assert.match(result.stderr, /not implemented/);
     } finally {
       home.cleanup();
     }

@@ -2,130 +2,132 @@
 
 > One skill, one source of truth, every agentic tool.
 
-多个 agentic tool 各有一套 `skills/` 目录，同一份技能会被复制成 N 份、各自漂移，链接断了也没人知道。Skillo 用一个 SSOT（单一事实源）加逐技能的 Windows junction 解决这件事：技能内容只存在一处，Claude Code / WorkBuddy / Qoder / Codex 等 harness 通过链接读取，改一次全部生效。
+[README-ZH](README-ZH.md)
 
-MVP 为个人级、单机、Windows 优先。当前可用命令：`init` / `status` / `link` / `unlink` / `doctor` / `adopt`；`ssot set`、`annotate` 尚未实现。
+Every agentic tool keeps its own `skills/` directory, so one skill gets copied N times and drifts N ways — and nobody notices when a link breaks. Skillo fixes that with a single source of truth plus per-skill Windows junctions: skill content lives in exactly one place, harnesses read it through links, and one edit takes effect everywhere.
 
-设计文档见 `plan/PRD.md`、`plan/SPEC.md`、`plan/TECH_DESIGN.md`。
+Compatible on Windows systems. Available commands: `init` / `list` / `link` / `unlink` / `doctor` / `harness` / `adopt`; `ssot set` and `annotate` are not implemented yet.
 
-## 安装
+Design documents live in `plan/PRD.md`, `plan/SPEC.md` and `plan/TECH_DESIGN.md` (all in Chinese).
 
-已发布到 npm：**[skillo](https://www.npmjs.com/package/skillo)**，要求 Node ≥ 18。
+## Install
+
+Published to npm: **[skillo](https://www.npmjs.com/package/skillo)**, requires Node ≥ 18.
 
 ```bash
-npx skillo --help        # 免安装直接用
-npm i -g skillo          # 或者装成全局命令，之后直接 skillo <command>
+npx skillo --help        # run it without installing
+npm i -g skillo          # or install globally, then call skillo <command> directly
 ```
 
-上手三步。`init` 会写 `~/.skillo/config.json` 并建立锚点 `~/.agents/skills`；第三步加了 `--dry-run`，只打印计划，不动任何 harness 目录：
+Three steps to get started. `init` writes `~/.skillo/config.json` and creates the anchor at `~/.agents/skills`; the third step adds `--dry-run`, which only prints the plan and touches no harness directory:
 
 ```bash
 npx skillo init
-npx skillo status
-npx skillo link --dry-run     # 确认无误后再去掉 --dry-run
+npx skillo list
+npx skillo link --dry-run     # drop --dry-run once the plan looks right
 ```
 
-## 开发模式启动
+## Development mode
 
-开发时**不需要编译**。源码中的 import 带着 `.ts` 后缀，直接由 Node 的原生类型擦除（type stripping）执行。
+You do **not** need to compile during development. Imports in the source carry a `.ts` suffix and run directly through Node's native type stripping.
 
-前置条件：
+Prerequisites:
 
-- Node **≥ 22.18**（原生擦除类型默认开启）。`node -v` 确认，本仓库在 v22.22.2 上验证。
-- 在仓库根目录执行（`package.json` 里的脚本用的是相对路径）。
-- 依赖安装：`npm install`。`prepare` 钩子声明了构建，但 npm 12 默认拦截 install script（会提示 `install-scripts ... blocked`），实际不会执行；dev 流程不需要它。
+- Node **≥ 22.18** (type stripping is on by default). Confirm with `node -v`; this repo is verified on v22.22.2.
+- Run from the repository root (the scripts in `package.json` use relative paths).
+- Install dependencies: `npm install`. The `prepare` hook declares a build, but npm 12 blocks install scripts by default (`install-scripts ... blocked`), so it never actually runs; the dev flow does not need it.
 
 ```bash
 npm run dev -- --help
 npm run dev -- init
-npm run dev -- status --matrix
-npm run dev -- link find-skills --to workbuddy --dry-run
+npm run dev -- list --matrix
+npm run dev -- link find-skills --to [harness] --dry-run
 ```
 
-命令与参数之间的 `--` 不可省略，否则参数会被 npm 吃掉。
+The `--` between the command and its arguments is required, otherwise npm swallows the arguments.
 
-## 构建
+## Build
 
 ```bash
 npm run build     # tsc -p tsconfig.build.json → dist/
 ```
 
-- 输入 `src/**/*.ts`，输出 `dist/**/*.js`（附带 `.js.map`），入口为 `dist/bin/skillo.js`，shebang 已保留，可直接 `node dist/bin/skillo.js`。
-- `rewriteRelativeImportExtensions` 在构建时把 `.ts` 后缀改写为 `.js`，因此 `dist/` 可在 Node 18+ 运行（`engines` 声明的下限），只有 dev 模式需要 22.18+。
-- 想看到源码行号：`node --enable-source-maps dist/bin/skillo.js status`。
+- Input `src/**/*.ts`, output `dist/**/*.js` (with `.js.map`); the entry point is `dist/bin/skillo.js`, the shebang is preserved, so `node dist/bin/skillo.js` works directly.
+- `rewriteRelativeImportExtensions` rewrites the `.ts` suffix to `.js` at build time, so `dist/` runs on Node 18+ (the lower bound declared in `engines`); only dev mode needs 22.18+.
+- To see source line numbers: `node --enable-source-maps dist/bin/skillo.js list`.
 
-其他脚本：
+Other scripts:
 
-| 命令              | 作用                                 |
-| --------------- | ---------------------------------- |
-| `npm run check` | `tsc --noEmit` 全量类型检查              |
-| `npm test`      | 单元 + 集成测试（104 项），每个用例在沙箱 `HOME` 内跑 |
-| `npm link`      | 把本地源码注册成全局 `skillo`，覆盖 npm 上的同名命令  |
+| Command         | Purpose                                                               |
+| --------------- | --------------------------------------------------------------------- |
+| `npm run check` | `tsc --noEmit` full type check                                        |
+| `npm test`      | unit + integration tests (120 cases), each in a sandboxed `HOME`      |
+| `npm link`      | register the local source as a global `skillo`, shadowing the npm one |
 
-注意：npm 12 默认拦截 `prepare` 等 install script，`npm link` 不会自动重新构建，装完用的仍是 `dist/` 里**当时**的产物。改了源码后要么先 `npm run build`，要么开发期直接走 `npm run dev --`。卸载用 `npm unlink -g skillo`。
+Note: npm 12 blocks install scripts such as `prepare` by default, so `npm link` does not rebuild — after installing you are still running whatever was in `dist/` **at that moment**. After changing the source, either run `npm run build` first, or just use `npm run dev --` while developing. Uninstall with `npm unlink -g skillo`.
 
-同理，`npx skillo` 和全局 `skillo` 跑的都是**已发布的包**，不是本地源码。想确认本地改动是否生效，只认 `npm run dev --`。
+By the same token, both `npx skillo` and a global `skillo` run the **published package**, not your local source. To confirm a local change works, trust only `npm run dev --`.
 
-### 发布
+### Publishing
 
 ```bash
-npm run build && npm pack --dry-run   # 确认 dist 是最新的、README 已进包
+npm run build && npm pack --dry-run   # confirm dist is current and README is in the package
 npm publish
 ```
 
-npm 12 会拦截 `prepare`，所以别指望 `npm publish` 自动构建 —— 先手动 `npm run build`，否则发出去的是 `dist/` 里的旧代码。
+npm 12 blocks `prepare`, so do not expect `npm publish` to build for you — run `npm run build` by hand first, otherwise you ship the stale code sitting in `dist/`.
 
-## 命令速查
+## Command reference
 
 ```
-skillo init                 建立锚点 ~/.agents/skills、探测已安装的 harness
-skillo list [skill]         技能 × harness 分布，--matrix 看矩阵
-skillo link [skill...]      分发到 harness，默认全部技能 × 全部 harness
-skillo unlink [skill...]    撤销分发，只删链接不碰内容
-skillo doctor [harness]     诊断断链/冲突/锚点异常，--fix 修复
-skillo adopt --from <id>    把 harness 里的实体技能目录纳入 SSOT
+skillo init                 create the anchor ~/.agents/skills, detect installed harnesses
+skillo list [skill]         skill x harness distribution; --matrix for the matrix view
+skillo link [skill...]      distribute to harnesses; defaults to all skills x all harnesses
+skillo unlink [skill...]    remove distribution; deletes links only, never content
+skillo doctor [harness]     diagnose broken links / conflicts / anchor problems; --fix repairs
+skillo adopt --from <id>    adopt real skill directories from a harness into the SSOT
 ```
 
-通用选项：`--dry-run` 只输出计划、`-h` / `-v`。`status --json` 可拿机器可读结果。
+Common options: `--dry-run` prints the plan only, `--json` for machine-readable output, `-h` / `-v`. `list --json` gives machine-readable output.
 
 ## Doctor
 
-`skillo doctor [harness]` 按「锚点 → 各 harness」两层扫描，只列问题不改动；加 `--fix` 才执行修复，`--dry-run` 打印将要做的修复但不落盘。带上 harness id 只查那一个。不带 `--fix` 时只要出现 `error` 级发现，退出码就非 0，可以挂进定时任务当健康检查。
+`skillo doctor [harness]` scans in two layers, anchor → each harness, and only lists problems without changing anything; add `--fix` to actually repair, `--dry-run` to print the repairs without writing them. Pass a harness id to check just that one. Without `--fix`, any `error`-level finding makes the exit code non-zero, so it can be dropped into a scheduled job as a health check.
 
 ```
-skillo doctor            # 全量诊断
-skillo doctor [harness]  # 只看一个 harness
-skillo doctor --dry-run  # 只说要修什么
-skillo doctor --fix      # 真修
+skillo doctor            # full diagnosis
+skillo doctor [harness]  # one harness only
+skillo doctor --dry-run  # only say what would be fixed
+skillo doctor --fix      # actually fix
 ```
 
-发现项分三档：
+Findings come in three tiers:
 
-| 档       | 常见项                                           | 处置           |
-| ------- | --------------------------------------------- | ------------ |
-| ✓ ok    | 锚点 junction 正常 / 原生读取锚点 / 已禁用 / N 个技能未分发到此    | 无需动作         |
-| ! warn  | 锚点是实体目录 / harness 目录不存在 / N 个链接绕过锚点           | 后两类可 `--fix` |
-| ✗ error | 锚点断链 / skills 目录本身是链接 / N 个链接断链 / 同名实体目录或文件占位 | 见下           |
+| Tier    | Common findings                                                                                                    | Action               |
+| ------- | ------------------------------------------------------------------------------------------------------------------ | -------------------- |
+| ✓ ok    | anchor junction healthy / reads the anchor natively / disabled / N skill(s) not distributed                        | nothing to do        |
+| ! warn  | anchor is a real directory / harness directory missing / N link(s) bypass the anchor                               | last two are fixable |
+| ✗ error | anchor link broken / skills directory is itself a link / N broken link(s) / name taken by a real directory or file | see below            |
 
-修复范围刻意收得很窄，只做四件事：**拆掉整目录 junction 并立即按技能重建**（不留空窗，但那一瞬该工具可能读不到技能）、**重建断掉的链接**、**把绕过锚点的链接重定向回锚点**、**创建缺失的 harness 目录**。
+The repair set is deliberately narrow — exactly four things: **detach a whole-directory junction and rebuild it per skill immediately** (no gap is left, though for a moment that tool may see no skills), **rebuild broken links**, **redirect links that bypass the anchor back through it**, and **create missing harness directories**.
 
-同样重要的是它**不**做什么：不重建锚点（断链时重建一个空的，会让技能看起来凭空消失）；不删除任何技能内容；不替你扩大分发范围——断链和绕道锚点的修复只针对出问题的技能，原本没分发的不会被顺手分发（唯一的例外是整目录 junction，它本来就靠全量重建）；不碰它自己没创建的条目。
+What it does **not** do matters just as much: it does not rebuild the anchor (rebuilding an empty one over a broken link makes skills look like they vanished); it deletes no skill content; it never widens your distribution — repairs for broken or anchor-bypassing links touch only the affected skills, and anything you deliberately left undistributed is not distributed as a side effect (the one exception is a whole-directory junction, which is rebuilt wholesale by nature); it leaves entries it did not create alone.
 
-需要人工介入的两种：同名实体目录占位，跑 `skillo adopt --from <harness>` 纳入 SSOT；锚点断链，恢复原路径（盘没挂载就挂回来），doctor 只会告诉你它原本指向哪里。至于同名**文件**占位，Skillo 同样不删，需要你手动处理。
+Two situations need a human: a real directory occupying the same name, which you resolve with `skillo adopt --from <harness>` to bring it into the SSOT; and a broken anchor, where you restore the original path (mount the drive again if it is unmounted) — doctor only tells you where it used to point. A **file** occupying the same name is likewise never deleted by Skillo; handle it by hand.
 
-## 目录结构
+## Layout
 
 ```
 src/
-  bin/skillo.ts     进程入口，只负责读写 stdout/stderr
-  cli/              参数解析、路由、配色输出
-  commands/         init / status / link / unlink / doctor / adopt
-  core/             锚点检测、配置持久化、扫描、relation、安全文件操作
-  presets/          harness 默认路径表
-  util/             错误、frontmatter、哈希、文本
+  bin/skillo.ts     process entry; only reads/writes stdout/stderr
+  cli/              argument parsing, routing, coloured output
+  commands/         init / list / link / unlink / doctor / adopt / harness
+  core/             anchor detection, config persistence, scanning, relations, safe fs ops
+  presets/          default harness path table
+  util/             errors, frontmatter, hashing, text
 test/
-  unit/             纯函数
-  integration/      在临时 HOME 里跑完整 CLI
+  unit/             pure functions
+  integration/      full CLI runs inside a temporary HOME
 ```
 
-配置写在 `~/.skillo/config.json`（原子写入，损坏时报错而不会覆盖）；被 `adopt` 替换掉的原目录移入 `~/.skillo/.trash/`。
+Config lives in `~/.skillo/config.json` (written atomically; a corrupt file is reported rather than overwritten); directories replaced by `adopt` are moved to `~/.skillo/.trash/`.
