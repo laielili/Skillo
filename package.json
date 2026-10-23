@@ -1,0 +1,38 @@
+{
+  "name": "skillo",
+  "version": "0.1.0",
+  "description": "One skill, one source of truth, every agentic tool.",
+  "type": "module",
+  "bin": {
+    "skillo": "dist/bin/skillo.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "node src/bin/skillo.ts",
+    "check": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\"",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "skills",
+    "agent",
+    "claude-code",
+    "junction",
+    "cli"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^7.0.2"
+  }
+}

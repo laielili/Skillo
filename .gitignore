@@ -1,0 +1,21 @@
+# build output
+dist/
+
+# dependencies
+node_modules/
+
+# scratch space (probes, throwaway scripts)
+.tmp/
+
+# editor / OS
+.DS_Store
+Thumbs.db
+*.log
+
+# agents
+plan
+.claude
+.codex
+.hermes
+.workbuddy
+.qoder
