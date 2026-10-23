@@ -13,8 +13,8 @@ import type { AnchorInfo, Env, Harness, SkilloConfig } from '../types.ts';
 import { detectAnchor } from '../core/anchor.ts';
 import { writeConfig } from '../core/config.ts';
 import { ensureDir, isDirectory } from '../core/fs-safe.ts';
-import { defaultAnchor } from '../core/paths.ts';
-import { HARNESS_PRESETS, PRESET_VERSION, harnessFromPreset } from '../presets/harnesses.ts';
+import { defaultAnchor, samePath } from '../core/paths.ts';
+import { HARNESS_PRESETS, harnessFromPreset } from '../presets/harnesses.ts';
 import { envError } from '../util/errors.ts';
 
 export interface InitInput {
@@ -29,6 +29,13 @@ export interface InitResult {
   registered: Harness[];
   /** Preset ids that exist on disk but were not registered. */
   skipped: string[];
+  /**
+   * Presets whose skills directory is the anchor itself.
+   *
+   * Not registered on purpose: they already see every skill, so a config entry
+   * would only add a line to the header. Telling the user is enough.
+   */
+  nativeShared: string[];
   createdAnchor: boolean;
 }
 
@@ -76,14 +83,21 @@ export function runInit(input: InitInput): InitResult {
 
   const registered: Harness[] = [];
   const skipped: string[] = [];
+  const nativeShared: string[] = [];
 
   for (const preset of HARNESS_PRESETS) {
     const candidate = path.join(env.home, ...preset.segments);
-    if (isDirectory(candidate)) {
-      registered.push(harnessFromPreset(preset, env));
-    } else {
+    if (!isDirectory(candidate)) {
       skipped.push(preset.id);
+      continue;
     }
+    // A preset that points at the anchor needs no registration: it is already
+    // reading the SSOT, and a config entry would only duplicate the header line.
+    if (samePath(candidate, anchorPath) || samePath(candidate, ssotRoot)) {
+      nativeShared.push(preset.id);
+      continue;
+    }
+    registered.push(harnessFromPreset(preset, env));
   }
 
   const config: SkilloConfig = {
@@ -94,8 +108,5 @@ export function runInit(input: InitInput): InitResult {
   };
   writeConfig(env, config);
 
-  return { config, anchor: detectAnchor(anchorPath), registered, skipped, createdAnchor };
+  return { config, anchor: detectAnchor(anchorPath), registered, skipped, nativeShared, createdAnchor };
 }
-
-/** Preset version in play, exported for `doctor` to compare against config. */
-export { PRESET_VERSION };

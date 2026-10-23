@@ -7,19 +7,11 @@
  * skill content, and it never touches entries it did not create.
  */
 
-import path from 'node:path';
-
 import type { Env, Harness } from '../types.ts';
 import { detectAnchor } from '../core/anchor.ts';
 import { readConfig } from '../core/config.ts';
-import {
-  classifyEntry,
-  ensureDir,
-  lstatOrNull,
-  readlinkOrNull,
-  removeJunction,
-} from '../core/fs-safe.ts';
-import { buildRelations } from '../core/relation.ts';
+import { ensureDir, lstatOrNull, readlinkOrNull, removeJunction } from '../core/fs-safe.ts';
+import { buildRelations, isNativeHarness } from '../core/relation.ts';
 import { scanSkills } from '../core/scan.ts';
 import { EXIT, envError, type ExitCode } from '../util/errors.ts';
 import { runLink } from './link.ts';
@@ -30,10 +22,12 @@ export type FindingCode =
   | 'anchor-broken'
   | 'harness-missing'
   | 'harness-ok'
+  | 'harness-native'
   | 'harness-whole-dir'
   | 'links-broken'
   | 'links-foreign'
   | 'links-conflict'
+  | 'links-invalid'
   | 'links-undistributed';
 
 export interface DoctorFinding {
@@ -119,6 +113,17 @@ export function runDoctor(input: DoctorInput): DoctorOutcome {
   );
 
   for (const harness of selected) {
+    // Native harnesses read the anchor directly: nothing to link, nothing to fix.
+    if (isNativeHarness(harness, config.anchor, anchor.ssotRoot)) {
+      findings.push({
+        scope: harness.id,
+        severity: 'ok',
+        code: 'harness-native',
+        message: '原生读取锚点，全部技能已可见',
+        fixable: false,
+      });
+      continue;
+    }
     findings.push(...inspectHarness(harness, config.ssotRoot, anchor.anchorPath, anchor.ssotRoot));
   }
 
@@ -249,6 +254,7 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
   const broken = rows.filter((row) => row.cells.some((cell) => cell.state === 'broken')).map((row) => row.skill.name);
   const foreign = rows.filter((row) => row.cells.some((cell) => cell.state === 'foreign')).map((row) => row.skill.name);
   const conflict = rows.filter((row) => row.cells.some((cell) => cell.state === 'conflict')).map((row) => row.skill.name);
+  const invalid = rows.filter((row) => row.cells.some((cell) => cell.state === 'invalid')).map((row) => row.skill.name);
   const undistributed = rows.filter((row) => row.cells.every((cell) => cell.state === 'absent')).length;
 
   if (broken.length > 0) {
@@ -284,6 +290,18 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
       detail: `需要 skillo adopt 纳入 SSOT，doctor 不会删除它们：${conflict.slice(0, 8).join(', ')}`,
       fixable: false,
       subjects: conflict,
+    });
+  }
+
+  if (invalid.length > 0) {
+    out.push({
+      scope: harness.id,
+      severity: 'error',
+      code: 'links-invalid',
+      message: `${invalid.length} 个同名文件占位`,
+      detail: `不是目录，Skillo 不会删除：${invalid.slice(0, 8).join(', ')}`,
+      fixable: false,
+      subjects: invalid,
     });
   }
 
@@ -331,9 +349,4 @@ function detachWholeDir(harness: Harness): void {
       err instanceof Error ? err.message : String(err),
     );
   }
-}
-
-/** Re-exported for callers that need the slot path convention. */
-export function slotOf(harness: Harness, skill: string): string {
-  return path.join(harness.path, skill);
 }

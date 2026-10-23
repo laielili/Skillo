@@ -74,8 +74,8 @@ function init(box: Box): void {
 }
 
 describe('skillo link', () => {
-  test('creates links for every skill in every registered harness', () => {
-    const box = makeBox(['claude-code', 'codex']);
+  test('creates links for every managed harness', () => {
+    const box = makeBox(['claude-code', 'qoder']);
     try {
       box.addSkill('alpha');
       box.addSkill('beta');
@@ -84,7 +84,9 @@ describe('skillo link', () => {
       const result = runCli(['link', '--all'], box.env);
       assert.equal(result.exitCode, 0);
 
-      for (const id of ['claude-code', 'codex']) {
+      // codex is native (its preset path is the anchor), so it is skipped by link
+      // and got no links of its own.
+      for (const id of ['claude-code', 'qoder']) {
         for (const skill of ['alpha', 'beta']) {
           const slot = path.join(box.harness(id), skill);
           assert.ok(fs.lstatSync(slot).isSymbolicLink(), `${id}/${skill} should be a link`);
@@ -269,9 +271,9 @@ describe('skillo doctor', () => {
       assert.match(result.stdout, /skills 目录本身是链接/);
       assert.match(result.stdout, /harness-whole-dir|逐技能链接无法生效/);
 
-      // status should attribute the cause, not just show N conflicts.
-      const status = runCli(['status'], box.env);
-      assert.match(status.stdout, /skills 目录本身是链接/);
+      // list should attribute the cause, not just show N conflicts.
+      const listOutput = runCli(['list'], box.env);
+      assert.match(listOutput.stdout, /skills 目录本身是链接/);
     } finally {
       box.cleanup();
     }
@@ -303,8 +305,8 @@ describe('skillo doctor', () => {
       }
 
       // And the result should read as healthy.
-      const status = runCli(['status', '--json'], box.env);
-      const payload = JSON.parse(status.stdout) as { data: { counts: { problem: number } } };
+      const listOutput = runCli(['list', '--json'], box.env);
+      const payload = JSON.parse(listOutput.stdout) as { data: { counts: { problem: number } } };
       assert.equal(payload.data.counts.problem, 0);
     } finally {
       box.cleanup();
@@ -387,18 +389,36 @@ describe('skillo doctor', () => {
     }
   });
 
+  test('reports a plain file occupying a skill name', () => {
+    const box = makeBox(['claude-code']);
+    try {
+      box.addSkill('markitdown');
+      init(box);
+      // A file where a directory is expected — `list` showed this state but
+      // `doctor` used to stay silent about it.
+      fs.writeFileSync(path.join(box.harness('claude-code'), 'markitdown'), 'not a dir', 'utf8');
+
+      const result = runCli(['doctor'], box.env);
+      assert.match(result.stdout, /同名文件占位/);
+      assert.match(result.stdout, /markitdown/);
+      assert.match(result.stdout, /不会删除/);
+    } finally {
+      box.cleanup();
+    }
+  });
+
   test('reports a missing harness directory as fixable', () => {
     const box = makeBox([]);
     try {
       box.addSkill('alpha');
       // Create then remove, so init registers it but the directory is gone.
-      fs.mkdirSync(path.join(box.env.home, '.codex', 'skills'), { recursive: true });
+      fs.mkdirSync(path.join(box.env.home, '.qoder', 'skills'), { recursive: true });
       init(box);
-      fs.rmSync(path.join(box.env.home, '.codex', 'skills'), { recursive: true, force: true });
+      fs.rmSync(path.join(box.env.home, '.qoder', 'skills'), { recursive: true, force: true });
 
-      const result = runCli(['doctor', '--fix', 'codex'], box.env);
+      const result = runCli(['doctor', '--fix', 'qoder'], box.env);
       assert.equal(result.exitCode, 0);
-      assert.ok(fs.existsSync(path.join(box.env.home, '.codex', 'skills')));
+      assert.ok(fs.existsSync(path.join(box.env.home, '.qoder', 'skills')));
     } finally {
       box.cleanup();
     }

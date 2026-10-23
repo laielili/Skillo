@@ -67,7 +67,7 @@ function addSkill(home: Home, name: string, body = ''): string {
   return dir;
 }
 
-interface StatusPayload {
+interface ListPayload {
   data: {
     counts: { ok: number; undistributed: number; problem: number };
     anchor: string;
@@ -83,16 +83,16 @@ interface StatusPayload {
   warnings: string[];
 }
 
-function statusJson(home: Home): StatusPayload {
-  const result = runCli(['status', '--json'], home.env);
-  assert.equal(result.exitCode, 0, `status failed: ${result.stderr}`);
-  return JSON.parse(result.stdout) as StatusPayload;
+function listJson(home: Home): ListPayload {
+  const result = runCli(['list', '--json'], home.env);
+  assert.equal(result.exitCode, 0, `list failed: ${result.stderr}`);
+  return JSON.parse(result.stdout) as ListPayload;
 }
 
 /* ─────────────────────────────── init ──────────────────────────────── */
 
 describe('skillo init', () => {
-  test('creates the anchor and registers only installed harnesses', () => {
+  test('creates the anchor and registers installed harnesses', () => {
     const home = makeHome();
     try {
       const result = runCli(['init'], home.env);
@@ -112,9 +112,12 @@ describe('skillo init', () => {
       assert.equal(config.ssotRoot, home.ssot);
       assert.deepEqual(
         config.harnesses.map((harness) => harness.id).sort(),
+        // codex and cline presets point at the anchor itself, so they are reported
+        // as native shares rather than registered.
         ['claude-code', 'workbuddy'],
       );
       assert.equal(config.harnesses.every((harness) => harness.preset === 'builtin'), true);
+      assert.match(result.stdout, /原生读取锚点/, 'native shares should be announced');
     } finally {
       home.cleanup();
     }
@@ -156,13 +159,13 @@ describe('skillo init', () => {
   });
 });
 
-/* ────────────────────────────── status ─────────────────────────────── */
+/* ─────────────────────────────── list ──────────────────────────────── */
 
-describe('skillo status', () => {
+describe('skillo list', () => {
   test('asks for init when no config exists', () => {
     const home = makeHome();
     try {
-      const result = runCli(['status'], home.env);
+      const result = runCli(['list'], home.env);
       assert.equal(result.exitCode, 4);
       assert.match(result.stderr, /尚未初始化/);
     } finally {
@@ -189,7 +192,7 @@ describe('skillo status', () => {
       // gamma: linked in one harness only → still "distributed".
       createJunction(gamma, path.join(home.ssotOf('claude-code'), 'gamma'), { requireSkillMd: true });
 
-      const payload = statusJson(home);
+      const payload = listJson(home);
       const byName = new Map(payload.data.skills.map((skill) => [skill.name, skill]));
 
       assert.equal(byName.get('alpha')?.group, 'problem');
@@ -209,7 +212,7 @@ describe('skillo status', () => {
       const alpha = addSkill(home, 'alpha');
       createJunction(alpha, path.join(home.ssotOf('claude-code'), 'alpha'), { requireSkillMd: true });
 
-      const payload = statusJson(home);
+      const payload = listJson(home);
       const alphaRow = payload.data.skills.find((skill) => skill.name === 'alpha');
       assert.ok(alphaRow !== undefined);
 
@@ -236,7 +239,7 @@ describe('skillo status', () => {
         { requireSkillMd: true },
       );
 
-      const payload = statusJson(home);
+      const payload = listJson(home);
       const alphaRow = payload.data.skills.find((skill) => skill.name === 'alpha');
       const cells = new Map(alphaRow?.cells.map((cell) => [cell.harness, cell.state]));
       assert.equal(cells.get('claude-code'), 'foreign');
@@ -253,7 +256,7 @@ describe('skillo status', () => {
       addSkill(home, 'alpha');
       addSkill(home, 'beta');
 
-      const result = runCli(['status'], home.env);
+      const result = runCli(['list'], home.env);
       assert.equal(result.exitCode, 0);
       assert.match(result.stdout, /未分发/);
       assert.match(result.stdout, /alpha/);
@@ -270,7 +273,7 @@ describe('skillo status', () => {
       const alpha = addSkill(home, 'alpha');
       createJunction(alpha, path.join(home.ssotOf('claude-code'), 'alpha'), { requireSkillMd: true });
 
-      const result = runCli(['status', 'alpha'], home.env);
+      const result = runCli(['list', 'alpha'], home.env);
       assert.equal(result.exitCode, 0);
       assert.match(result.stdout, /alpha/);
       assert.match(result.stdout, /claude-code/);
@@ -288,7 +291,7 @@ describe('skillo status', () => {
       runCli(['init'], home.env);
       addSkill(home, 'grill-me');
 
-      const result = runCli(['status', 'grill'], home.env);
+      const result = runCli(['list', 'grill'], home.env);
       assert.equal(result.exitCode, 2);
       assert.match(result.stderr, /找不到技能/);
     } finally {
@@ -302,7 +305,7 @@ describe('skillo status', () => {
       runCli(['init'], home.env);
       addSkill(home, 'alpha');
 
-      const result = runCli(['status', '--matrix'], home.env);
+      const result = runCli(['list', '--matrix'], home.env);
       assert.equal(result.exitCode, 0);
       assert.match(result.stdout, /SKILL/);
       assert.match(result.stdout, /claude-code/);
@@ -331,8 +334,8 @@ describe('skillo status', () => {
       // Now break it.
       fs.rmSync(realSsot, { recursive: true, force: true });
 
-      const result = runCli(['status'], home.env);
-      // SSOT is gone, so status must fail loudly rather than show an empty list.
+      const result = runCli(['list'], home.env);
+      // SSOT is gone, so list must fail loudly rather than show an empty list.
       assert.equal(result.exitCode, 4);
       assert.match(result.stderr, /SSOT 目录不存在/);
     } finally {
@@ -360,7 +363,7 @@ describe('cli surface', () => {
     try {
       const result = runCli(['--help'], home.env);
       assert.equal(result.exitCode, 0);
-      assert.match(result.stdout, /status/);
+      assert.match(result.stdout, /list/);
       assert.match(result.stdout, /doctor/);
     } finally {
       home.cleanup();

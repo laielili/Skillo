@@ -3,11 +3,13 @@
  *
  * Order is deliberate: machine-written evidence (`skills-lock.json`, marketplace
  * metadata) outranks human annotations, which outrank a bare `.git` directory,
- * which outranks "no idea".
+ * which outranks the default.
  *
- * Practical consequence on a real machine: a skill installed months ago with no
- * trace resolves to `unknown`. That is the honest answer, not a bug — `skillo
- * annotate` exists to fill it in after the fact.
+ * The fallback is `local`, not `unknown`. From the user's side, "no trace of where
+ * this came from" and "this is mine, it lives here" are the same situation: the
+ * skill is present in the SSOT and nothing external will overwrite it. Calling it
+ * `unknown` only produced a column full of question marks that answered nothing.
+ * `skillo annotate` still exists for recording the real origin when it is known.
  */
 
 import path from 'node:path';
@@ -85,6 +87,6 @@ export function resolveSources(skills: readonly Skill[], ssotRoot: string, env: 
       return { ...skill, source: 'git' as const, origin: null };
     }
 
-    return { ...skill, source: 'unknown' as const, origin: null };
+    return { ...skill, source: 'local' as const, origin: null };
   });
 }

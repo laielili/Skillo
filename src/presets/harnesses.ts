@@ -32,16 +32,25 @@ export const HARNESS_PRESETS: readonly HarnessPreset[] = [
   // WorkBuddy is absent from the skills CLI table entirely — path confirmed here.
   { id: 'workbuddy', name: 'WorkBuddy', segments: ['.workbuddy', 'skills'], verified: true },
   { id: 'qoder', name: 'Qoder', segments: ['.qoder', 'skills'], verified: true },
-  { id: 'codex', name: 'Codex', segments: ['.codex', 'skills'], verified: true },
+  // Official docs (developers.openai.com/codex/skills): USER scope is
+  // $HOME/.agents/skills — the anchor itself, so Codex is a native harness and
+  // needs no links. A ~/.codex/skills directory may exist from older installs;
+  // its presence does not mean Codex reads it.
+  { id: 'codex', name: 'Codex', segments: ['.agents', 'skills'], verified: true },
   { id: 'cursor', name: 'Cursor', segments: ['.cursor', 'skills'], verified: false },
   { id: 'github-copilot', name: 'GitHub Copilot', segments: ['.copilot', 'skills'], verified: false },
   { id: 'gemini-cli', name: 'Gemini CLI', segments: ['.gemini', 'skills'], verified: false },
   { id: 'windsurf', name: 'Windsurf', segments: ['.codeium', 'windsurf', 'skills'], verified: false },
   { id: 'opencode', name: 'OpenCode', segments: ['.config', 'opencode', 'skills'], verified: false },
+  // Cline's own docs list only ~/.cline/skills (Windows: C:\Users\<user>\.cline\skills).
+  // The skills CLI table claims ~/.agents/skills, but its official docs do not
+  // mention that alias — follow the vendor doc.
   { id: 'cline', name: 'Cline', segments: ['.cline', 'skills'], verified: false },
   { id: 'kiro-cli', name: 'Kiro CLI', segments: ['.kiro', 'skills'], verified: false },
   { id: 'amp', name: 'Amp', segments: ['.config', 'agents', 'skills'], verified: false },
-  { id: 'hermes', name: 'Hermes', segments: ['.hermes', 'skills'], verified: false },
+  // Id and display name follow the skills CLI table (hermes-agent); the path is
+  // unchanged at ~/.hermes/skills/.
+  { id: 'hermes-agent', name: 'Hermes Agent', segments: ['.hermes', 'skills'], verified: false },
 ];
 
 export function findPreset(id: string): HarnessPreset | undefined {

@@ -15,7 +15,7 @@ export interface Env {
 }
 
 /** Where a skill's content came from. Decides whether updating will clobber local edits. */
-export type SkillSource = 'local' | 'git' | 'market' | 'plugin' | 'unknown';
+export type SkillSource = 'local' | 'git' | 'market' | 'plugin';
 
 export interface Skill {
   /** Directory name inside the SSOT; doubles as the unique id. */

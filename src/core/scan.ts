@@ -49,8 +49,10 @@ export function scanSkills(ssotRoot: string): ScanResult {
     skills.push({
       name,
       path: dir,
-      // Filled in by resolveSources(); kept explicit so the default is visible.
-      source: 'unknown',
+      // Filled in by resolveSources(). `local` is the default because the skill
+      // literally exists here — "we don't know where it came from" and "it lives
+      // in your SSOT" describe the same situation from the user's side.
+      source: 'local',
       origin: null,
       description: front.description ?? '',
       sizeBytes: treeSize(dir),

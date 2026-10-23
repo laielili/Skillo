@@ -14,7 +14,7 @@ import {
   makePalette,
   renderMatrix,
   renderOverview,
-  type StatusView,
+  type ListView,
 } from '../../src/cli/output.ts';
 import type { Harness, RelationState } from '../../src/types.ts';
 import type { RelationCell, SkillRelations } from '../../src/core/relation.ts';
@@ -43,6 +43,7 @@ function row(name: string, states: Record<string, RelationState>): SkillRelation
     harnessId,
     harnessName: harnessId,
     state,
+    native: false,
   }));
 
   return {
@@ -99,10 +100,11 @@ describe('renderOverview alignment', () => {
       row('a-considerably-longer-name', { 'claude-code': 'conflict', workbuddy: 'absent' }),
     ];
 
-    const view: StatusView = {
+    const view: ListView = {
       ssotRoot: '/home/tester/.agents/skills',
       anchorPath: '/home/tester/.agents/skills',
       anchorNote: null,
+      nativeHarnessIds: [],
       harnessNotes: [],
       harnesses: [harness('claude-code'), harness('workbuddy')],
       rows,
@@ -124,10 +126,11 @@ describe('renderOverview content', () => {
   const palette = makePalette(false);
 
   test('shows harness notes above the groups', () => {
-    const view: StatusView = {
+    const view: ListView = {
       ssotRoot: '/ssot',
       anchorPath: '/anchor',
       anchorNote: null,
+      nativeHarnessIds: [],
       harnessNotes: ['claude-code：skills 目录本身是链接'],
       harnesses: [harness('claude-code')],
       rows: [],
@@ -143,10 +146,11 @@ describe('renderOverview content', () => {
   });
 
   test('empty SSOT says so instead of printing nothing', () => {
-    const view: StatusView = {
+    const view: ListView = {
       ssotRoot: '/ssot',
       anchorPath: '/anchor',
       anchorNote: null,
+      nativeHarnessIds: [],
       harnessNotes: [],
       harnesses: [],
       rows: [],

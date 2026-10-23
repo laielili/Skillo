@@ -11,6 +11,9 @@
 import { envError } from '../util/errors.ts';
 import type { Annotations, Env, Harness, SkilloConfig } from '../types.ts';
 import { annotationsFile, configFile } from './paths.ts';
+
+/** Values `annotations.json` is allowed to carry. Kept in sync with `SkillSource`. */
+const VALID_SOURCES: ReadonlySet<string> = new Set(['local', 'git', 'market', 'plugin']);
 import { readTextFile, writeFileAtomic } from './fs-safe.ts';
 
 /* ─────────────────────────────── reading ───────────────────────────── */
@@ -59,7 +62,10 @@ export function readAnnotations(env: Env): Annotations {
   for (const [name, value] of Object.entries(skills)) {
     const entry = asRecord(value);
     const source = entry['source'];
-    if (typeof source !== 'string') continue;
+    // Unknown or stale values (e.g. the retired `unknown`) are ignored rather than
+    // passed through, so a hand-edited file cannot inject a value the renderer has
+    // no label for. Falling back to the default is the correct degradation.
+    if (typeof source !== 'string' || !VALID_SOURCES.has(source)) continue;
     out[name] = {
       source: source as Annotations['skills'][string]['source'],
       origin: typeof entry['origin'] === 'string' ? entry['origin'] : null,

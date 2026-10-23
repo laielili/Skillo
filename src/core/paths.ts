@@ -58,11 +58,6 @@ export function isUnc(p: string): boolean {
   return /^\\\\[^\\]+\\/.test(p) || /^\/\/[^/]+\//.test(p);
 }
 
-/** First path segment, used to decide whether two paths share a drive. */
-export function rootOf(p: string): string {
-  return path.parse(path.resolve(p)).root;
-}
-
 /** Render a path with the home directory abbreviated to `~`, for output only. */
 export function toDisplay(p: string, env: Env): string {
   const resolved = path.resolve(p);
@@ -71,16 +66,6 @@ export function toDisplay(p: string, env: Env): string {
     return rel === '' ? '~' : `~${path.sep}${rel}`;
   }
   return resolved;
-}
-
-/**
- * Guard used before deleting or replacing anything inside a directory.
- * Returns an error message when the operation would step outside the boundary.
- */
-export function assertInside(parent: string, child: string, what: string): void {
-  if (!isInside(parent, child)) {
-    throw new Error(`${what} 位于边界之外：${child}`);
-  }
 }
 
 /** `~/.skillo` config directory for the given environment. */

@@ -1,7 +1,7 @@
 /**
  * Display-width helpers.
  *
- * Only needed because `status` renders mixed CJK/Latin text. Kept hand-rolled
+ * Only needed because `list` renders mixed CJK/Latin text. Kept hand-rolled
  * instead of pulling in `string-width`: the whole point of this project is a
  * dependency-free binary, and the range table below covers what we render.
  */

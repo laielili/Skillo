@@ -12,7 +12,7 @@ import type { Env, Harness, RelationState } from '../types.ts';
 import { detectAnchor } from '../core/anchor.ts';
 import { readConfig } from '../core/config.ts';
 import { classifyEntry, createJunction, isDirectory, removeJunction } from '../core/fs-safe.ts';
-import { isInside } from '../core/paths.ts';
+import { isNativeHarness } from '../core/relation.ts';
 import { scanSkills } from '../core/scan.ts';
 import { EXIT, envError, usageError, type ExitCode } from '../util/errors.ts';
 
@@ -56,6 +56,8 @@ interface Context {
   anchorPath: string;
   anchorReal: string;
   harnesses: Harness[];
+  /** Harnesses excluded because they read the anchor directly. */
+  nativeIds: string[];
   skillNames: string[];
 }
 
@@ -80,13 +82,29 @@ function prepare(env: Env): Context {
     env,
     anchorPath: config.anchor,
     anchorReal: anchor.ssotRoot,
-    harnesses: config.harnesses.filter((harness) => harness.enabled),
+    // Native harnesses see the anchor directly; creating links inside them would
+    // put entries into the anchor itself. They are filtered out rather than
+    // reported as "already linked", because there is nothing to link.
+    harnesses: config.harnesses.filter(
+      (harness) => harness.enabled && !isNativeHarness(harness, config.anchor, anchor.ssotRoot),
+    ),
+    nativeIds: config.harnesses
+      .filter((harness) => isNativeHarness(harness, config.anchor, anchor.ssotRoot))
+      .map((harness) => harness.id),
     skillNames: scan.skills.map((skill) => skill.name),
   };
 }
 
 function resolveHarnesses(context: Context, requested: string[] | null): Harness[] {
   if (requested === null) return context.harnesses;
+
+  const native = requested.filter((id) => context.nativeIds.includes(id));
+  if (native.length > 0) {
+    throw usageError(
+      `${native.join(', ')} 原生读取锚点，无需链接`,
+      '这类 harness 的 skills 目录就是锚点本身，技能本来就全部可见',
+    );
+  }
 
   const wanted = new Set(requested);
   const unknown = [...wanted].filter((id) => !context.harnesses.some((harness) => harness.id === id));
@@ -288,11 +306,4 @@ function exitCodeFor(items: readonly LinkItem[]): ExitCode {
     (item) => item.action === 'conflict' || item.action === 'failed' || item.action === 'refused-invalid',
   );
   return blocked ? EXIT.PARTIAL : EXIT.OK;
-}
-
-/** Guard used by callers that pass an arbitrary target directory. */
-export function assertSlotInsideHarness(harnessPath: string, slot: string): void {
-  if (!isInside(harnessPath, slot)) {
-    throw envError(`拒绝操作 harness 之外的路径：${slot}`);
-  }
 }

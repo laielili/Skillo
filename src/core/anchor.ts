@@ -40,8 +40,3 @@ export function detectAnchor(anchorPath: string): AnchorInfo {
 
   return { mode: 'junction', anchorPath, ssotRoot: resolved, danglingTarget: null };
 }
-
-/** True when skills can be read through the anchor. */
-export function isUsable(info: AnchorInfo): boolean {
-  return (info.mode === 'junction' || info.mode === 'real-dir') && info.ssotRoot !== null;
-}

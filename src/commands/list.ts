@@ -1,5 +1,5 @@
 /**
- * `skillo status`
+ * `skillo list`
  *
  * The only command in M2, and the one that has to earn trust: everything it
  * prints is recomputed from the file system on every run. No cached relation
@@ -11,7 +11,13 @@ import { detectAnchor } from '../core/anchor.ts';
 import { readConfig } from '../core/config.ts';
 import { isDirectory } from '../core/fs-safe.ts';
 import { samePath } from '../core/paths.ts';
-import { buildRelations, countGroups, inspectHarnesses, type SkillRelations } from '../core/relation.ts';
+import {
+  buildRelations,
+  countGroups,
+  inspectHarnesses,
+  nativeHarnessIds,
+  type SkillRelations,
+} from '../core/relation.ts';
 import { scanSkills } from '../core/scan.ts';
 import { resolveSources } from '../core/source.ts';
 import {
@@ -20,13 +26,13 @@ import {
   renderDetail,
   renderMatrix,
   renderOverview,
-  statusJson,
+  listJson,
   type Palette,
-  type StatusView,
+  type ListView,
 } from '../cli/output.ts';
 import { EXIT, envError, usageError, type ExitCode } from '../util/errors.ts';
 
-export interface StatusInput {
+export interface ListInput {
   env: Env;
   /** Restrict to a single skill and render its detail view. */
   skill?: string;
@@ -35,12 +41,12 @@ export interface StatusInput {
   palette?: Palette;
 }
 
-export interface StatusOutcome {
+export interface ListOutcome {
   text: string;
   exitCode: ExitCode;
 }
 
-export function runStatus(input: StatusInput): StatusOutcome {
+export function runList(input: ListInput): ListOutcome {
   const { env } = input;
   const palette = input.palette ?? makePalette(colourEnabled(process.stdout));
 
@@ -92,7 +98,8 @@ export function runStatus(input: StatusInput): StatusOutcome {
     anchorPath: config.anchor,
   });
 
-  const harnessNotes = inspectHarnesses(config.harnesses);
+  const nativeIds = nativeHarnessIds(config.harnesses, config.anchor, anchorReal);
+  const harnessNotes = inspectHarnesses(config.harnesses, nativeIds);
 
   if (input.skill !== undefined) {
     const target = rows.find((row) => row.skill.name === input.skill);
@@ -105,11 +112,12 @@ export function runStatus(input: StatusInput): StatusOutcome {
     };
   }
 
-  const view: StatusView = {
+  const view: ListView = {
     ssotRoot: config.ssotRoot,
     anchorPath: config.anchor,
     anchorNote,
     harnessNotes: harnessNotes.map((note) => note.message),
+    nativeHarnessIds: nativeIds,
     harnesses: config.harnesses,
     rows,
     counts: countGroups(rows),
@@ -117,7 +125,7 @@ export function runStatus(input: StatusInput): StatusOutcome {
   };
 
   if (input.json === true) {
-    return { text: `${JSON.stringify(statusJson(view), null, 2)}\n`, exitCode: EXIT.OK };
+    return { text: `${JSON.stringify(listJson(view), null, 2)}\n`, exitCode: EXIT.OK };
   }
 
   if (input.matrix === true) {
@@ -159,7 +167,7 @@ function suggest(input: string, rows: readonly SkillRelations[]): string | undef
     .slice(0, 5);
 
   if (close.length === 0) {
-    return '运行 skillo status 查看全部技能';
+    return '运行 skillo list 查看全部技能';
   }
   return `你是不是想找：${close.join('、')}`;
 }

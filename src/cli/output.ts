@@ -9,8 +9,6 @@
  * is not the default because it degrades badly past ~20 skills.
  */
 
-import path from 'node:path';
-
 import type { Env, Harness, RelationState } from '../types.ts';
 import type { RelationCounts, SkillGroup, SkillRelations } from '../core/relation.ts';
 import { toDisplay } from '../core/paths.ts';
@@ -84,12 +82,14 @@ const STATE_LABEL: Record<RelationState, string> = {
 
 /* ─────────────────────────────── views ─────────────────────────────── */
 
-export interface StatusView {
+export interface ListView {
   ssotRoot: string;
   anchorPath: string;
   anchorNote: string | null;
   /** Harness-level problems that explain whole columns looking wrong. */
   harnessNotes: readonly string[];
+  /** Harnesses that read the anchor directly and therefore need no links. */
+  nativeHarnessIds: readonly string[];
   harnesses: readonly Harness[];
   rows: readonly SkillRelations[];
   counts: RelationCounts;
@@ -99,8 +99,6 @@ export interface StatusView {
 export interface RenderOptions {
   env: Env;
   palette: Palette;
-  /** Column budget for the agents list before it is trimmed. */
-  width?: number;
 }
 
 const NAME_COL = 34;
@@ -133,7 +131,9 @@ function groupHeader(group: SkillGroup, count: number, palette: Palette): string
 
 function overviewLine(row: SkillRelations, options: RenderOptions): string {
   const { palette } = options;
-  const linked = row.cells.filter((cell) => cell.state === 'linked');
+  // Native harnesses are omitted from the agent column: they see every skill by
+  // construction, so listing them on every line would add noise without signal.
+  const linked = row.cells.filter((cell) => cell.state === 'linked' && !cell.native);
   const problems = row.cells.filter((cell) => cell.state !== 'linked' && cell.state !== 'absent');
 
   const linkedPlain = linked.map((cell) => cell.harnessId).join(', ');
@@ -142,7 +142,6 @@ function overviewLine(row: SkillRelations, options: RenderOptions): string {
       ? palette.dim('—')
       : linked.map((cell) => palette.accent(cell.harnessId)).join(palette.dim(', '));
 
-  const problemPlain = problems.map((cell) => `${cell.harnessId} ${cell.state}`).join('   ');
   const problemColoured = problems
     .map((cell) => `${palette.error(cell.harnessId)} ${palette.dim(`(${cell.state})`)}`)
     .join('   ');
@@ -159,20 +158,28 @@ function overviewLine(row: SkillRelations, options: RenderOptions): string {
   );
 }
 
-export function renderOverview(view: StatusView, options: RenderOptions): string {
+export function renderOverview(view: ListView, options: RenderOptions): string {
   const { palette } = options;
   const lines: string[] = [];
   const issueNote = view.counts.problem > 0 ? palette.error(` · ${view.counts.problem} issue`) : '';
+  const managed = view.harnesses.filter((harness) => !view.nativeHarnessIds.includes(harness.id)).length;
 
   lines.push(
     `${palette.bold('Skillo')}${palette.dim(' · ')}${view.rows.length} skills${palette.dim(' · ')}${
-      view.harnesses.length
+      managed
     } agents${issueNote}`,
   );
   lines.push(`${palette.dim('SSOT  ')} ${toDisplay(view.ssotRoot, options.env)}`);
   lines.push(`${palette.dim('Anchor')} ${toDisplay(view.anchorPath, options.env)}`);
   if (view.anchorNote !== null) {
     lines.push(`${palette.dim('      ')} ${palette.warn(view.anchorNote)}`);
+  }
+  if (view.nativeHarnessIds.length > 0) {
+    lines.push(
+      `${palette.dim('      ')} ${palette.ok('≡')} ${palette.dim('原生读取锚点：')}${view.nativeHarnessIds
+        .map((id) => palette.accent(id))
+        .join(palette.dim(', '))}`,
+    );
   }
   for (const note of view.harnessNotes) {
     lines.push(`${palette.dim('      ')} ${palette.warn(note)}`);
@@ -225,6 +232,10 @@ export function renderDetail(row: SkillRelations, options: RenderOptions): strin
 
   const idWidth = Math.max(...row.cells.map((cell) => displayWidth(cell.harnessId)), 12) + 2;
   for (const cell of row.cells) {
+    if (cell.native) {
+      lines.push(`  ${padDisplay(cell.harnessId, idWidth)}${palette.ok('≡')} ${palette.dim('native — 读取锚点本身')}`);
+      continue;
+    }
     lines.push(
       `  ${padDisplay(cell.harnessId, idWidth)}${paintState(cell.state, palette)} ${palette.dim(
         STATE_LABEL[cell.state],
@@ -242,6 +253,7 @@ export function renderMatrix(rows: readonly SkillRelations[], harnesses: readonl
 
   const idWidth = 12;
   const nameWidth = Math.max(...rows.map((row) => displayWidth(row.skill.name)), 5) + 2;
+  const nativeSet = new Set((rows[0]?.cells ?? []).filter((cell) => cell.native).map((cell) => cell.harnessId));
 
   const header =
     padDisplay('SKILL', nameWidth) + active.map((harness) => padDisplay(truncateDisplay(harness.id, idWidth), idWidth)).join('');
@@ -251,15 +263,20 @@ export function renderMatrix(rows: readonly SkillRelations[], harnesses: readonl
     let line = padDisplay(row.skill.name, nameWidth);
     for (const harness of active) {
       const cell = row.cells.find((candidate) => candidate.harnessId === harness.id);
-      const plain = cell === undefined ? '?' : STATE_GLYPH[cell.state];
-      const coloured = cell === undefined ? '?' : paintState(cell.state, palette);
+      const plain = cell === undefined ? '?' : nativeSet.has(harness.id) ? '≡' : STATE_GLYPH[cell.state];
+      const coloured =
+        cell === undefined
+          ? '?'
+          : nativeSet.has(harness.id)
+            ? palette.ok('≡')
+            : paintState(cell.state, palette);
       line += padColoured(plain, coloured, idWidth);
     }
     lines.push(line);
   }
 
   lines.push('');
-  lines.push(palette.dim('  ✓ linked   · absent   F foreign   ! broken   C conflict   X invalid'));
+  lines.push(palette.dim('  ✓ linked   · absent   F foreign   ! broken   C conflict   X invalid   ≡ native'));
 
   return lines.join('\n') + '\n';
 }
@@ -273,7 +290,7 @@ export interface JsonEnvelope {
   warnings: string[];
 }
 
-export function statusJson(view: StatusView): JsonEnvelope {
+export function listJson(view: ListView): JsonEnvelope {
   return {
     ok: true,
     data: {
@@ -281,12 +298,14 @@ export function statusJson(view: StatusView): JsonEnvelope {
       anchor: view.anchorPath,
       anchorNote: view.anchorNote,
       harnessNotes: [...view.harnessNotes],
+      nativeHarnesses: [...view.nativeHarnessIds],
       counts: view.counts,
       harnesses: view.harnesses.map((harness) => ({
         id: harness.id,
         name: harness.name,
         path: harness.path,
         enabled: harness.enabled,
+        native: view.nativeHarnessIds.includes(harness.id),
       })),
       skills: view.rows.map((row) => ({
         name: row.skill.name,
@@ -301,15 +320,4 @@ export function statusJson(view: StatusView): JsonEnvelope {
     },
     warnings: [...view.warnings],
   };
-}
-
-/** Default rendering width when the terminal cannot report one. */
-export function terminalWidth(): number {
-  const width = process.stdout.columns;
-  return typeof width === 'number' && width > 40 ? width : 100;
-}
-
-/** Join a path for display without assuming it exists. */
-export function displayPath(target: string, env: Env): string {
-  return path.normalize(toDisplay(target, env));
 }

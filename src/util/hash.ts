@@ -67,8 +67,3 @@ export function dirHash(root: string, options: DirHashOptions = {}): DirHashResu
     fileCount += 1;
   }
 }
-
-/** Short hash for display purposes. */
-export function shortHash(full: string): string {
-  return full.slice(0, 12);
-}
