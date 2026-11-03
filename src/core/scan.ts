@@ -18,6 +18,20 @@ export interface ScanResult {
   warnings: string[];
 }
 
+/**
+ * Names sitting at the SSOT root, without reading any skill content.
+ *
+ * Deliberately unfiltered: a plain file with the same name also stops `adopt`
+ * from copying a directory in, so the caller wants to know about it too.
+ */
+export function ssotEntryNames(ssotRoot: string): Set<string> {
+  try {
+    return new Set(fs.readdirSync(ssotRoot));
+  } catch {
+    return new Set<string>();
+  }
+}
+
 export function scanSkills(ssotRoot: string): ScanResult {
   const warnings: string[] = [];
   const skills: Skill[] = [];

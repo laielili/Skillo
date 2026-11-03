@@ -7,6 +7,8 @@
  * skill content, and it never touches entries it did not create.
  */
 
+import path from 'node:path';
+
 import type { Env, Harness } from '../types.ts';
 import { detectAnchor } from '../core/anchor.ts';
 import { readConfig } from '../core/config.ts';
@@ -14,6 +16,7 @@ import { ensureDir, lstatOrNull, readlinkOrNull, removeJunction } from '../core/
 import { buildRelations, isNativeHarness } from '../core/relation.ts';
 import { scanSkills } from '../core/scan.ts';
 import { EXIT, envError, type ExitCode } from '../util/errors.ts';
+import { assertNever } from '../util/assert.ts';
 import { runLink } from './link.ts';
 
 export type FindingCode =
@@ -133,7 +136,7 @@ export function runDoctor(input: DoctorInput): DoctorOutcome {
       findings,
       repaired: [],
       relinked: 0,
-      exitCode: findings.some((finding) => finding.severity === 'error') ? EXIT.ENV : EXIT.OK,
+      exitCode: exitCodeFor(findings),
     };
   }
 
@@ -191,8 +194,18 @@ export function runDoctor(input: DoctorInput): DoctorOutcome {
         break;
       }
 
-      default:
+      case 'links-conflict':
+      case 'links-invalid':
+      case 'links-undistributed':
+      case 'harness-native':
+      case 'harness-ok':
+      case 'anchor-ok':
+      case 'anchor-real-dir':
+      case 'anchor-broken':
         break;
+
+      default:
+        return assertNever(finding.code, 'unhandled finding code');
     }
   }
 
@@ -200,8 +213,24 @@ export function runDoctor(input: DoctorInput): DoctorOutcome {
     findings,
     repaired,
     relinked,
-    exitCode: EXIT.OK,
+    // Repaired findings no longer dictate the exit code.
+    exitCode: exitCodeFor(findings.filter((finding) => !repaired.includes(finding.code))),
   };
+}
+
+function exitCodeFor(findings: readonly DoctorFinding[]): ExitCode {
+  if (findings.some((finding) => finding.code === 'anchor-broken')) return EXIT.ENV;
+  if (
+    findings.some(
+      (finding) =>
+        finding.code === 'harness-whole-dir' ||
+        finding.code === 'links-conflict' ||
+        finding.code === 'links-invalid',
+    )
+  ) {
+    return EXIT.CONFLICT;
+  }
+  return EXIT.OK;
 }
 
 function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, anchorReal: string): DoctorFinding[] {
@@ -258,12 +287,16 @@ function inspectHarness(harness: Harness, ssotRoot: string, anchorPath: string, 
   const undistributed = rows.filter((row) => row.cells.every((cell) => cell.state === 'absent')).length;
 
   if (broken.length > 0) {
+    const described = broken.slice(0, 8).map((name) => {
+      const raw = readlinkOrNull(path.join(harness.path, name));
+      return raw === null ? name : `${name} → ${raw}`;
+    });
     out.push({
       scope: harness.id,
       severity: 'error',
       code: 'links-broken',
       message: `${broken.length} broken link(s)`,
-      detail: broken.slice(0, 8).join(', ') + (broken.length > 8 ? ' …' : ''),
+      detail: described.join(', ') + (broken.length > 8 ? ' …' : ''),
       fixable: true,
       subjects: broken,
     });

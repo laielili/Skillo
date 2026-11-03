@@ -344,6 +344,165 @@ describe('skillo list', () => {
   });
 });
 
+/* ─────────────────────────── list --harness ─────────────────────────── */
+
+function addHarnessSkill(home: Home, harnessId: string, name: string): string {
+  const dir = path.join(home.ssotOf(harnessId), name);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${name}\n---\n# ${name}\n`, 'utf8');
+  return dir;
+}
+
+describe('skillo list --harness', () => {
+  test('shows the real directories the SSOT has never seen', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+      const alpha = addSkill(home, 'alpha');
+      createJunction(alpha, path.join(home.ssotOf('workbuddy'), 'alpha'), { requireSkillMd: true });
+      addHarnessSkill(home, 'workbuddy', 'cloudflare');
+
+      const result = runCli(['list', '--harness', 'workbuddy'], home.env);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.match(result.stdout, /adoptable \(1\)/);
+      assert.match(result.stdout, /cloudflare/);
+      assert.match(result.stdout, /linked \(1\)/);
+      assert.match(result.stdout, /alpha/);
+      assert.match(result.stdout, /skillo adopt workbuddy/);
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('separates a clean adoption from one that needs --keep', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+      addSkill(home, 'beta');
+      addHarnessSkill(home, 'workbuddy', 'beta');
+      addHarnessSkill(home, 'workbuddy', 'cloudflare');
+
+      const result = runCli(['list', '--harness', 'workbuddy'], home.env);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.match(result.stdout, /○ adoptable \(1\)/);
+      assert.match(result.stdout, /^ {4}cloudflare/m);
+      assert.match(result.stdout, /! needs a decision \(1\)/);
+      assert.match(result.stdout, /^ {4}beta/m);
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('names the problems a link cannot carry', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+      const alpha = addSkill(home, 'alpha');
+      createJunction(alpha, path.join(home.ssotOf('workbuddy'), 'alpha'), { requireSkillMd: true });
+      // Point the link somewhere the SSOT does not have.
+      fs.rmSync(path.join(home.ssotOf('workbuddy'), 'alpha'), { recursive: true, force: true });
+      fs.symlinkSync(path.join(home.root, 'nowhere'), path.join(home.ssotOf('workbuddy'), 'alpha'), 'junction');
+      fs.writeFileSync(path.join(home.ssotOf('workbuddy'), 'notes.txt'), 'not a skill', 'utf8');
+
+      const result = runCli(['list', '--harness', 'workbuddy'], home.env);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.match(result.stdout, /needs attention \(2\)/);
+      assert.match(result.stdout, /alpha\s+broken/);
+      assert.match(result.stdout, /notes\.txt\s+invalid/);
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('a native harness has nothing to adopt', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+      addSkill(home, 'alpha');
+      const added = runCli(['harness', 'add', 'my-tool', '--path', home.ssot], home.env);
+      assert.equal(added.exitCode, 0, added.stderr);
+
+      const result = runCli(['list', '--harness', 'my-tool'], home.env);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.match(result.stdout, /reads the anchor natively/);
+      assert.match(result.stdout, /✓ in the SSOT \(1\)/);
+      assert.match(result.stdout, /^ {4}alpha/m);
+      assert.doesNotMatch(result.stdout, /skillo adopt/);
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('--json reports the raw facts, not the grouping', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+      addSkill(home, 'beta');
+      addHarnessSkill(home, 'workbuddy', 'beta');
+
+      const result = runCli(['list', '--harness', 'workbuddy', '--json'], home.env);
+      assert.equal(result.exitCode, 0, result.stderr);
+      const payload = JSON.parse(result.stdout) as {
+        data: {
+          harness: { id: string; native: boolean };
+          entries: Array<{ name: string; state: string; native: boolean; inSsot: boolean; target: string | null; sizeBytes: number | null }>;
+        };
+      };
+      assert.equal(payload.data.harness.id, 'workbuddy');
+      assert.equal(payload.data.harness.native, false);
+      assert.equal(payload.data.entries.length, 1);
+      const beta = payload.data.entries[0];
+      assert.equal(beta?.name, 'beta');
+      assert.equal(beta?.state, 'conflict');
+      assert.equal(beta?.inSsot, true);
+      assert.equal(beta?.target, null);
+      assert.notEqual(beta?.sizeBytes, null, 'a real directory has a size');
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('refuses the views that cannot be combined', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+
+      const bare = runCli(['list', '--harness'], home.env);
+      assert.equal(bare.exitCode, 2);
+      assert.match(bare.stderr, /needs a harness id/);
+
+      const withSkill = runCli(['list', 'alpha', '--harness', 'workbuddy'], home.env);
+      assert.equal(withSkill.exitCode, 2);
+      assert.match(withSkill.stderr, /whole directory/);
+
+      const withMatrix = runCli(['list', '--harness', 'workbuddy', '--matrix'], home.env);
+      assert.equal(withMatrix.exitCode, 2);
+      assert.match(withMatrix.stderr, /cannot be combined/);
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('an unregistered harness says so, a missing directory does not throw', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+
+      const unknown = runCli(['list', '--harness', 'nope'], home.env);
+      assert.equal(unknown.exitCode, 2);
+      assert.match(unknown.stderr, /unknown harness: nope/);
+
+      fs.rmSync(home.ssotOf('workbuddy'), { recursive: true, force: true });
+      const missing = runCli(['list', '--harness', 'workbuddy'], home.env);
+      assert.equal(missing.exitCode, 0, missing.stderr);
+      assert.match(missing.stdout, /directory does not exist/);
+      assert.match(missing.stdout, /no skills in/);
+    } finally {
+      home.cleanup();
+    }
+  });
+});
+
 /* ─────────────────────────────── misc ──────────────────────────────── */
 
 describe('cli surface', () => {
@@ -381,12 +540,159 @@ describe('cli surface', () => {
     }
   });
 
-  test('unimplemented command says so instead of pretending', () => {
+  test('unknown ssot subcommand is a usage error', () => {
     const home = makeHome();
     try {
-      const result = runCli(['annotate', 'grill-me', '--source', 'local'], home.env);
+      const result = runCli(['ssot', 'move', 'somewhere'], home.env);
       assert.equal(result.exitCode, 2);
-      assert.match(result.stderr, /not implemented/);
+      assert.match(result.stderr, /unknown ssot subcommand/);
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('--version matches package.json', () => {
+    const home = makeHome();
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as { version: string };
+      const result = runCli(['--version'], home.env);
+      assert.equal(result.stdout.trim(), pkg.version);
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('a corrupt config is reported and never overwritten', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+      const file = path.join(home.env.home, '.skillo', 'config.json');
+      fs.writeFileSync(file, '{ definitely not json', 'utf8');
+
+      const result = runCli(['list'], home.env);
+      assert.equal(result.exitCode, 4);
+      assert.match(result.stderr, /not valid JSON/);
+      assert.equal(fs.readFileSync(file, 'utf8'), '{ definitely not json');
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('--json turns errors into a machine-readable envelope', () => {
+    const home = makeHome();
+    try {
+      const result = runCli(['list', '--json'], home.env);
+      assert.equal(result.exitCode, 4);
+      assert.equal(result.stderr, '');
+      const payload = JSON.parse(result.stdout) as { ok: boolean; error: { code: string; message: string } };
+      assert.equal(payload.ok, false);
+      assert.equal(payload.error.code, 'ENV');
+      assert.match(payload.error.message, /not initialized/);
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('detail view shows both the SSOT path and the anchor path', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+      addSkill(home, 'alpha');
+
+      const result = runCli(['list', 'alpha'], home.env);
+      assert.equal(result.exitCode, 0);
+      assert.match(result.stdout, /SKILL/);
+      assert.match(result.stdout, /ANCHOR/);
+      assert.match(result.stdout, /\.agents[\\/]skills[\\/]alpha/);
+
+      const payload = JSON.parse(runCli(['list', 'alpha', '--json'], home.env).stdout) as {
+        data: { anchorPath: string };
+      };
+      assert.match(payload.data.anchorPath, /\.agents[\\/]skills[\\/]alpha/);
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('problem groups render before healthy groups', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+      addSkill(home, 'alpha');
+      addSkill(home, 'beta');
+      runCli(['link', 'alpha'], home.env);
+      fs.mkdirSync(path.join(home.ssotOf('claude-code'), 'beta'), { recursive: true });
+
+      const result = runCli(['list'], home.env);
+      const problem = result.stdout.indexOf('needs attention');
+      const healthy = result.stdout.indexOf('distributed (');
+      assert.ok(problem >= 0, 'problem header should exist');
+      assert.ok(healthy >= 0, 'healthy header should exist');
+      assert.ok(problem < healthy, 'problems must come first');
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('annotate records provenance while the lock file still outranks it', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+      const alpha = addSkill(home, 'alpha');
+
+      const missing = runCli(['annotate', 'alpha'], home.env);
+      assert.equal(missing.exitCode, 2);
+
+      const annotated = runCli(['annotate', 'alpha', '--source', 'market', '--origin', 'skillhub:alpha'], home.env);
+      assert.equal(annotated.exitCode, 0, annotated.stderr);
+
+      let payload = JSON.parse(runCli(['list', 'alpha', '--json'], home.env).stdout) as {
+        data: { source: string; origin: string | null };
+      };
+      assert.equal(payload.data.source, 'market');
+      assert.equal(payload.data.origin, 'skillhub:alpha');
+
+      fs.writeFileSync(
+        path.join(home.ssot, 'skills-lock.json'),
+        JSON.stringify({ skills: { alpha: { source: 'owner/repo' } } }),
+        'utf8',
+      );
+      payload = JSON.parse(runCli(['list', 'alpha', '--json'], home.env).stdout) as {
+        data: { source: string; origin: string | null };
+      };
+      assert.equal(payload.data.source, 'git');
+      assert.equal(payload.data.origin, 'owner/repo');
+
+      fs.rmSync(path.join(home.ssot, 'skills-lock.json'));
+      fs.writeFileSync(path.join(alpha, '_skillhub_meta.json'), JSON.stringify({ skillId: 'alpha-id' }), 'utf8');
+      payload = JSON.parse(runCli(['list', 'alpha', '--json'], home.env).stdout) as {
+        data: { source: string; origin: string | null };
+      };
+      assert.equal(payload.data.source, 'market');
+      assert.equal(payload.data.origin, 'alpha-id');
+    } finally {
+      home.cleanup();
+    }
+  });
+
+  test('re-running init preserves harnesses added by hand', () => {
+    const home = makeHome();
+    try {
+      runCli(['init'], home.env);
+      const custom = path.join(home.root, 'custom-skills');
+      fs.mkdirSync(custom, { recursive: true });
+      const added = runCli(['harness', 'add', 'custom-one', '--path', custom, '--name', 'Custom One'], home.env);
+      assert.equal(added.exitCode, 0, added.stderr);
+
+      const again = runCli(['init'], home.env);
+      assert.equal(again.exitCode, 0, again.stderr);
+
+      const config = JSON.parse(
+        fs.readFileSync(path.join(home.env.home, '.skillo', 'config.json'), 'utf8'),
+      ) as { harnesses: Array<{ id: string; name: string; path: string }> };
+      const kept = config.harnesses.find((harness) => harness.id === 'custom-one');
+      assert.equal(kept?.name, 'Custom One');
+      assert.equal(kept?.path, path.resolve(custom));
     } finally {
       home.cleanup();
     }

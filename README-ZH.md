@@ -6,7 +6,7 @@
 
 多个 agentic tool 各有一套 `skills/` 目录，同一份技能会被复制成 N 份、各自漂移，链接断了也没人知道。Skillo 用一个 SSOT（单一事实源）加逐技能的 Windows junction 解决这件事：技能内容只存在一处，harness 通过链接读取，改一次全部生效。
 
-仅支持 Windows 系统。当前可用命令：`init` / `list` / `link` / `unlink` / `doctor` / `harness` / `adopt`；`ssot set`、`annotate` 尚未实现。
+仅支持 Windows 系统。当前可用命令：`init` / `list` / `link` / `unlink` / `doctor` / `harness` / `adopt` / `ssot set` / `annotate`。
 
 > **语言说明**：CLI 自身的输出（帮助、报错、诊断）为**英文**，README.md 同理；本文件是配套的中文说明。设计文档见 `plan/PRD.md`、`plan/SPEC.md`、`plan/TECH_DESIGN.md`（均为中文）。
 
@@ -61,7 +61,7 @@ npm run build     # tsc -p tsconfig.build.json → dist/
 | 命令              | 作用                                 |
 | --------------- | ---------------------------------- |
 | `npm run check` | `tsc --noEmit` 全量类型检查              |
-| `npm test`      | 单元 + 集成测试（120 项），每个用例在沙箱 `HOME` 内跑 |
+| `npm test`      | 单元 + 集成测试（150 项），每个用例在沙箱 `HOME` 内跑 |
 | `npm link`      | 把本地源码注册成全局 `skillo`，覆盖 npm 上的同名命令  |
 
 注意：npm 12 默认拦截 `prepare` 等 install script，`npm link` 不会自动重新构建，装完用的仍是 `dist/` 里**当时**的产物。改了源码后要么先 `npm run build`，要么开发期直接走 `npm run dev --`。卸载用 `npm unlink -g skillo`。
@@ -82,14 +82,17 @@ npm 12 会拦截 `prepare`，所以别指望 `npm publish` 自动构建 —— �
 ```
 skillo init                 建立锚点 ~/.agents/skills、探测已安装的 harness
 skillo list [skill]         技能 × harness 分布，--matrix 看矩阵
+skillo list --harness <id>  只看某个 harness 自己目录里的技能，含未纳入 SSOT 的
 skillo link [skill...]      分发到 harness，默认全部技能 × 全部 harness
 skillo unlink [skill...]    撤销分发，只删链接不碰内容
 skillo doctor [harness]     诊断断链/冲突/锚点异常，--fix 修复
-skillo harness [list]       查看已注册 / 可添加的 harness
-skillo adopt --from <id>    把 harness 里的实体技能目录纳入 SSOT
+skillo harness [list]       查看已注册 / 可添加的 harness；原生读取锚点的排在上方一行
+skillo adopt <id> [skill]   把 harness 里的实体技能目录纳入 SSOT
+skillo ssot set <path>      迁移 SSOT：复制 → 哈希校验 → 改锚点
+skillo annotate <skill>     登记技能来源（--source / --origin）
 ```
 
-通用选项：`--dry-run` 只输出计划、`--json` 机器可读、`-h` / `-v`。`list --json` 可拿机器可读结果。
+通用选项：`--dry-run` 只输出计划、`--json` 机器可读（所有命令）、`-h` / `-v`。
 
 ## Doctor
 
@@ -114,7 +117,19 @@ skillo doctor --fix      # 真修
 
 同样重要的是它**不**做什么：不重建锚点（断链时重建一个空的，会让技能看起来凭空消失）；不删除任何技能内容；不替你扩大分发范围——断链和绕道锚点的修复只针对出问题的技能，原本没分发的不会被顺手分发（唯一的例外是整目录 junction，它本来就靠全量重建）；不碰它自己没创建的条目。
 
-需要人工介入的两种：同名实体目录占位，跑 `skillo adopt --from <harness>` 纳入 SSOT；锚点断链，恢复原路径（盘没挂载就挂回来），doctor 只会告诉你它原本指向哪里。至于同名**文件**占位，Skillo 同样不删，需要你手动处理。
+需要人工介入的两种：同名实体目录占位，跑 `skillo adopt <harness>` 纳入 SSOT；锚点断链，恢复原路径（盘没挂载就挂回来），doctor 只会告诉你它原本指向哪里。至于同名**文件**占位，Skillo 同样不删，需要你手动处理。
+
+## 看某个 harness 自己攒了什么
+
+`skillo list` 是从 SSOT 往外看的，所以那些不经 Skillo 装进 harness 的技能没有行、也就看不见。`skillo list --harness <id>` 反过来读该 harness 自己的 skills 目录，逐条归档：`adoptable`（SSOT 没有的实体目录）、`needs a decision`（SSOT 已有同名的实体目录，adopt 时要 `--keep`）、`needs attention`（断链 / 绕过锚点 / 被文件占位）、`linked`。结尾直接给出补口的命令：
+
+```
+skillo adopt workbuddy [<skill>] brings the real directories into the SSOT and leaves a link behind
+```
+
+## 迁移 SSOT
+
+`skillo ssot set D:\新位置` 会复制 SSOT、逐文件哈希校验，然后改锚点、更新配置并删除旧库——SSOT 只保留一份。加 `--keep-old` 才会把旧库改名为 `<旧路径>.migrated-<时间戳>`。harness 链接指向锚点而不是旧路径，所以迁移后继续有效。`--dry-run` 只打印计划。目标目录非空会被拒绝；锚点是实体目录时需要 `--yes`。
 
 ## 目录结构
 
@@ -122,8 +137,8 @@ skillo doctor --fix      # 真修
 src/
   bin/skillo.ts     进程入口，只负责读写 stdout/stderr
   cli/              参数解析、路由、配色输出
-  commands/         init / list / link / unlink / doctor / adopt / harness
-  core/             锚点检测、配置持久化、扫描、relation、安全文件操作
+  commands/         init / list / link / unlink / doctor / adopt / harness / ssot / annotate
+  core/             锚点检测、配置持久化、扫描、relation、迁移、安全文件操作
   presets/          harness 默认路径表
   util/             错误、frontmatter、哈希、文本
 test/
@@ -131,7 +146,7 @@ test/
   integration/      在临时 HOME 里跑完整 CLI
 ```
 
-配置写在 `~/.skillo/config.json`（原子写入，损坏时报错而不会覆盖）；被 `adopt` 替换掉的原目录移入 `~/.skillo/.trash/`。
+配置写在 `~/.skillo/config.json`（原子写入，损坏时报错而不会覆盖）；`adopt` 会把即将被替换的原目录先暂存到 `~/.skillo/.tmp/`，哈希校验通过、链接可读之后**删除暂存包**——SSOT 的第二份副本正是这个工具要消灭的东西，所以还留在 `.tmp/` 里的都表示某一步没走完。
 
 ## 术语对照
 

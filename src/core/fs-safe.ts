@@ -18,6 +18,16 @@ import { conflictError, envError } from '../util/errors.ts';
 import { isInside, isUnc, samePath } from './paths.ts';
 import type { RelationState } from '../types.ts';
 
+/** Windows junctions hit the legacy MAX_PATH limit unless long paths are enabled. */
+export const MAX_WINDOWS_PATH = 260;
+const LONG_PATH_WARNING = 240;
+
+/** Non-fatal notice for paths approaching the Windows limit. */
+export function longPathWarning(target: string): string | null {
+  if (target.length < LONG_PATH_WARNING) return null;
+  return `path is ${target.length} chars, close to the Windows limit: ${target}`;
+}
+
 /* ────────────────────────────── probing ────────────────────────────── */
 
 /**
@@ -161,6 +171,15 @@ export function createJunction(
   if (!path.isAbsolute(linkPath)) {
     throw envError(`link path must be absolute: ${linkPath}`);
   }
+  if (!path.isAbsolute(target)) {
+    throw envError(`link target must be absolute: ${target}`);
+  }
+  if (linkPath.length >= MAX_WINDOWS_PATH) {
+    throw envError(
+      `path is too long for Windows (${linkPath.length} chars): ${linkPath}`,
+      'move the harness or the SSOT closer to the drive root, then retry',
+    );
+  }
   if (isUnc(target)) {
     throw envError(
       `junctions do not support UNC paths: ${target}`,
@@ -275,7 +294,6 @@ export interface CopyTreeResult {
 }
 
 export interface CopyTreeOptions {
-  onProgress?: (copied: number, total: number) => void;
   /**
    * File names to skip at any depth.
    *
@@ -321,7 +339,25 @@ export function copyTree(src: string, dst: string, options: CopyTreeOptions = {}
     fs.copyFileSync(from, to);
     result.copiedFiles += 1;
     result.bytes += st.size;
-    options.onProgress?.(result.copiedFiles, result.copiedFiles);
+  }
+}
+
+/** Free bytes on the volume containing `target`, or null when the probe fails. */
+export function freeBytes(target: string): number | null {
+  try {
+    const stats = fs.statfsSync(target);
+    return Number(stats.bavail) * Number(stats.bsize);
+  } catch {
+    return null;
+  }
+}
+
+/** Number of entries in a directory; 0 when it does not exist or cannot be read. */
+export function entryCount(target: string): number {
+  try {
+    return fs.readdirSync(target).length;
+  } catch {
+    return 0;
   }
 }
 
@@ -339,22 +375,30 @@ export function treeSize(target: string): number {
   return total;
 }
 
-/* ─────────────────────────────── trash ─────────────────────────────── */
+/* ────────────────────────────── staging ────────────────────────────── */
 
 /**
- * Move a path into the trash directory instead of deleting it.
+ * Move a path into the staging directory instead of deleting it.
  *
  * Anything overwritten by `adopt` passes through here first — the project
  * already lost track of seven diverged skills once, so "probably fine" is not
- * an acceptable standard for destruction.
+ * an acceptable standard for destruction. Staging is a crash window, not an
+ * archive: the caller deletes the package once the transfer has been verified,
+ * because a second copy of the SSOT is the exact redundancy this tool exists to
+ * remove. Anything left behind therefore marks a step that did not complete.
  *
- * Returns the destination path so callers can tell the user where it went.
+ * `label` names which side the package came from, so `...-ssot-grill-me` and
+ * `...-harness-grill-me` are distinguishable after a failed `--keep harness`;
+ * both sides share a basename otherwise.
+ *
+ * Returns the destination path so callers can report where it went.
  */
-export function moveToTrash(target: string, trashRoot: string): string {
-  ensureDir(trashRoot);
+export function moveToStaging(target: string, stagingRoot: string, label?: string): string {
+  ensureDir(stagingRoot);
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dest = path.join(trashRoot, `${stamp}-${path.basename(target)}`);
+  const name = label === undefined ? path.basename(target) : `${label}-${path.basename(target)}`;
+  const dest = path.join(stagingRoot, `${stamp}-${name}`);
 
   try {
     fs.renameSync(target, dest);
@@ -369,21 +413,66 @@ export function moveToTrash(target: string, trashRoot: string): string {
         'the original content is still in place; migrate it by hand',
       );
     }
-    removeTree(target, path.dirname(target));
+    purgeTree(target, path.dirname(target));
   }
 
   return dest;
 }
 
 /**
+ * Rename a path to a sibling carrying `suffix`, adding a counter when taken.
+ *
+ * Used for the recoverable half of `ssot set`: the old tree leaves its original
+ * name but is never destroyed in the same operation.
+ */
+export function moveSibling(target: string, suffix: string): string {
+  const base = path.resolve(target);
+  let dest = `${base}${suffix}`;
+  let counter = 1;
+  while (lstatOrNull(dest) !== null) {
+    dest = `${base}${suffix}-${counter}`;
+    counter += 1;
+  }
+
+  try {
+    fs.renameSync(base, dest);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    throw envError(
+      `could not move ${target} aside: ${err instanceof Error ? err.message : String(err)}`,
+      code === 'EXDEV'
+        ? 'the backup has to stay on the same volume as the old SSOT'
+        : 'check permissions and close any tool that still has a file open',
+    );
+  }
+
+  return dest;
+}
+
+/** Rename an exact path, surfacing a useful hint when the OS refuses. */
+export function renamePath(from: string, to: string): void {
+  try {
+    fs.renameSync(from, to);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    throw envError(
+      `could not rename ${from}: ${err instanceof Error ? err.message : String(err)}`,
+      code === 'EXDEV'
+        ? 'both paths have to be on the same volume'
+        : 'check permissions and close any tool that still has a file open',
+    );
+  }
+}
+
+/**
  * Recursive delete, but only inside an explicitly declared boundary.
  *
- * This is the single place in the codebase permitted to call `rmSync` with
- * `recursive: true`. The boundary argument is not decoration: it is why every
- * other module can be written without that option, and why a mistyped path
- * fails here instead of erasing a skill tree.
+ * Call sites are deliberately narrow: the staging directory, a partial copy this
+ * process just created, and `ssot set` after the copy was verified and the
+ * anchor switched. The boundary is what keeps a mistyped path from erasing a
+ * live tree.
  */
-export function removeTree(target: string, boundary: string): void {
+export function purgeTree(target: string, boundary: string): void {
   if (samePath(boundary, target)) {
     throw envError(`refusing to delete the boundary itself: ${target}`);
   }

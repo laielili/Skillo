@@ -15,7 +15,7 @@ import { readConfig, writeConfig } from '../core/config.ts';
 import { ensureDir, isDirectory, lstatOrNull, readlinkOrNull, realpathOrNull } from '../core/fs-safe.ts';
 import { expandHome, isUnc } from '../core/paths.ts';
 import { isNativeHarness, isNativePath } from '../core/relation.ts';
-import { HARNESS_PRESETS, PRESET_VERSION, findPreset, presetPath } from '../presets/harnesses.ts';
+import { HARNESS_PRESETS, PRESET_VERSION, findPreset, harnessLabel, presetPath } from '../presets/harnesses.ts';
 import { conflictError, envError, usageError } from '../util/errors.ts';
 
 /** Ids become path segments and appear in output, so keep them boring. */
@@ -27,6 +27,8 @@ export interface HarnessAddInput {
   /** Omit to use the built-in preset path. */
   path?: string;
   name?: string;
+  /** Create the skills directory when it does not exist. */
+  createDir?: boolean;
 }
 
 export interface HarnessAddResult {
@@ -80,6 +82,12 @@ export function runHarnessAdd(input: HarnessAddInput): HarnessAddResult {
 
   let createdDir = false;
   if (!isDirectory(target)) {
+    if (input.createDir !== true) {
+      throw usageError(
+        `directory does not exist: ${target}`,
+        'create it first, or pass --create to let Skillo create it',
+      );
+    }
     ensureDir(target);
     createdDir = true;
   }
@@ -164,6 +172,8 @@ export interface HarnessListResult {
   nativePresets: string[];
   /** Presets with no directory on this machine. */
   absent: string[];
+  /** Harnesses that see every skill because their directory IS the anchor. */
+  direct: Array<{ id: string; name: string }>;
 }
 
 export function runHarnessList(env: Env): HarnessListResult {
@@ -204,5 +214,19 @@ export function runHarnessList(env: Env): HarnessListResult {
     addable.push({ id: preset.id, name: preset.name, path: candidate });
   }
 
-  return { registered, addable, nativePresets, absent };
+  const direct: HarnessListResult['direct'] = [];
+  const seen = new Set<string>();
+
+  for (const probe of registered) {
+    if (!probe.native || seen.has(probe.harness.id)) continue;
+    direct.push({ id: probe.harness.id, name: probe.harness.name });
+    seen.add(probe.harness.id);
+  }
+  for (const id of nativePresets) {
+    if (seen.has(id)) continue;
+    direct.push({ id, name: harnessLabel(id) });
+    seen.add(id);
+  }
+
+  return { registered, addable, nativePresets, absent, direct };
 }

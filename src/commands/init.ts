@@ -11,10 +11,10 @@ import path from 'node:path';
 
 import type { AnchorInfo, Env, Harness, SkilloConfig } from '../types.ts';
 import { detectAnchor } from '../core/anchor.ts';
-import { writeConfig } from '../core/config.ts';
+import { readConfig, writeConfig } from '../core/config.ts';
 import { ensureDir, isDirectory } from '../core/fs-safe.ts';
 import { defaultAnchor, samePath } from '../core/paths.ts';
-import { HARNESS_PRESETS, harnessFromPreset } from '../presets/harnesses.ts';
+import { HARNESS_PRESETS, harnessFromPreset, presetPath } from '../presets/harnesses.ts';
 import { envError } from '../util/errors.ts';
 
 export interface InitInput {
@@ -41,7 +41,9 @@ export interface InitResult {
 
 export function runInit(input: InitInput): InitResult {
   const { env } = input;
-  const anchorPath = defaultAnchor(env);
+  // Re-running init must not silently drop harnesses the user added or edited.
+  const existing = readConfig(env);
+  const anchorPath = existing?.anchor ?? defaultAnchor(env);
   const anchor = detectAnchor(anchorPath);
 
   if (anchor.mode === 'broken') {
@@ -86,7 +88,7 @@ export function runInit(input: InitInput): InitResult {
   const nativeShared: string[] = [];
 
   for (const preset of HARNESS_PRESETS) {
-    const candidate = path.join(env.home, ...preset.segments);
+    const candidate = presetPath(preset, env);
     if (!isDirectory(candidate)) {
       skipped.push(preset.id);
       continue;
@@ -100,13 +102,20 @@ export function runInit(input: InitInput): InitResult {
     registered.push(harnessFromPreset(preset, env));
   }
 
+  const harnesses = [...(existing?.harnesses ?? [])];
+  for (const harness of registered) {
+    if (!harnesses.some((candidate) => candidate.id === harness.id)) {
+      harnesses.push(harness);
+    }
+  }
+
   const config: SkilloConfig = {
     version: 1,
     anchor: anchorPath,
     ssotRoot,
-    harnesses: registered,
+    harnesses,
   };
   writeConfig(env, config);
 
-  return { config, anchor: detectAnchor(anchorPath), registered, skipped, nativeShared, createdAnchor };
+  return { config, anchor: detectAnchor(anchorPath), registered: harnesses, skipped, nativeShared, createdAnchor };
 }

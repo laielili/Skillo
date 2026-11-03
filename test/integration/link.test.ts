@@ -127,7 +127,7 @@ describe('skillo link', () => {
       fs.writeFileSync(path.join(occupied, 'keep.txt'), 'precious', 'utf8');
 
       const result = runCli(['link', '--all'], box.env);
-      assert.equal(result.exitCode, 5, 'partial failure');
+      assert.equal(result.exitCode, 3, 'conflict needs a user decision');
       assert.match(result.stdout, /conflict/);
       assert.equal(fs.readFileSync(path.join(occupied, 'keep.txt'), 'utf8'), 'precious');
     } finally {
@@ -246,8 +246,56 @@ describe('skillo unlink', () => {
       fs.mkdirSync(occupied, { recursive: true });
 
       const result = runCli(['unlink', 'alpha'], box.env);
-      assert.equal(result.exitCode, 5);
+      assert.equal(result.exitCode, 3);
       assert.ok(fs.existsSync(occupied), 'real directory must survive');
+    } finally {
+      box.cleanup();
+    }
+  });
+
+  test('treats an empty directory as a conflict, not a free slot', () => {
+    const box = makeBox(['claude-code']);
+    try {
+      box.addSkill('alpha');
+      init(box);
+
+      const occupied = path.join(box.harness('claude-code'), 'alpha');
+      fs.mkdirSync(occupied, { recursive: true });
+
+      const result = runCli(['link', 'alpha'], box.env);
+      assert.equal(result.exitCode, 3);
+      assert.match(result.stdout, /conflict/);
+      assert.ok(fs.lstatSync(occupied).isDirectory());
+      assert.deepEqual(fs.readdirSync(occupied), []);
+    } finally {
+      box.cleanup();
+    }
+  });
+
+  test('--replace before the skill name still targets only that skill', () => {
+    const box = makeBox(['claude-code']);
+    try {
+      box.addSkill('alpha');
+      box.addSkill('beta');
+      init(box);
+
+      const outside = path.join(box.root, 'outside', 'alpha');
+      fs.mkdirSync(outside, { recursive: true });
+      fs.writeFileSync(path.join(outside, 'SKILL.md'), '---\nname: alpha\n---\n', 'utf8');
+      const slot = path.join(box.harness('claude-code'), 'alpha');
+      fs.symlinkSync(outside, slot, 'junction');
+
+      const result = runCli(['link', '--replace', 'alpha', '--to', 'claude-code'], box.env);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(
+        fs.realpathSync(slot).toLowerCase(),
+        fs.realpathSync(path.join(box.ssot, 'alpha')).toLowerCase(),
+      );
+      assert.equal(
+        fs.existsSync(path.join(box.harness('claude-code'), 'beta')),
+        false,
+        'a positional must not be swallowed into the flag',
+      );
     } finally {
       box.cleanup();
     }
@@ -308,6 +356,27 @@ describe('skillo doctor', () => {
       const listOutput = runCli(['list', '--json'], box.env);
       const payload = JSON.parse(listOutput.stdout) as { data: { counts: { problem: number } } };
       assert.equal(payload.data.counts.problem, 0);
+    } finally {
+      box.cleanup();
+    }
+  });
+
+  test('reports the original target of a broken link', () => {
+    const box = makeBox(['claude-code']);
+    try {
+      box.addSkill('alpha');
+      init(box);
+
+      const gone = path.join(box.root, 'gone');
+      fs.mkdirSync(gone, { recursive: true });
+      const slot = path.join(box.harness('claude-code'), 'alpha');
+      fs.symlinkSync(gone, slot, 'junction');
+      fs.rmSync(gone, { recursive: true, force: true });
+
+      const result = runCli(['doctor'], box.env);
+      assert.match(result.stdout, /broken link/);
+      assert.match(result.stdout, /alpha → /);
+      assert.match(result.stdout, /gone/);
     } finally {
       box.cleanup();
     }

@@ -9,16 +9,18 @@
 
 import type { Env } from '../types.ts';
 import { hasFlag, listFlag, parseArgs, stringFlag, type ParsedArgs } from './args.ts';
-import { colourEnabled, makePalette, type Palette } from './output.ts';
-import { runAdopt, type AdoptItem } from '../commands/adopt.ts';
-import { runDoctor, type DoctorFinding } from '../commands/doctor.ts';
+import { colourEnabled, makePalette } from './output.ts';
+import { renderAdopt, renderFinding, renderHarnessList, renderLinkItems, renderSsotSet } from './render.ts';
+import { runAdopt } from '../commands/adopt.ts';
+import { runAnnotate } from '../commands/annotate.ts';
+import { runDoctor } from '../commands/doctor.ts';
 import { runHarnessAdd, runHarnessList, runHarnessRemove } from '../commands/harness.ts';
 import { runInit } from '../commands/init.ts';
-import { runLink, runUnlink, type LinkItem } from '../commands/link.ts';
+import { runLink, runUnlink } from '../commands/link.ts';
 import { runList } from '../commands/list.ts';
+import { runSsotSet } from '../commands/ssot.ts';
 import { EXIT, SkilloError, toSkilloError, usageError, type ExitCode } from '../util/errors.ts';
 import { toDisplay } from '../core/paths.ts';
-import { padDisplay } from '../util/text.ts';
 
 export interface RunOutcome {
   stdout: string;
@@ -26,7 +28,7 @@ export interface RunOutcome {
   exitCode: ExitCode;
 }
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.6';
 
 export const HELP = `skillo — one skill, one source of truth, every agentic tool
 
@@ -36,24 +38,34 @@ USAGE
 COMMANDS
   init                    First-time setup: create the anchor, detect harnesses
   list [skill]            Show how skills are distributed across harnesses
+  list --harness <id>     Show every entry inside one harness, adopted or not
   link [skill...]         Distribute skills to harnesses
   unlink [skill...]       Remove distribution
   doctor [harness]        Diagnose and repair
   harness [list]          Show registered / addable harnesses
   harness add <id>        Register a harness (built-in preset or --path)
   harness remove <id>     Unregister a harness
-  adopt                   Adopt real skill directories into the SSOT   (M4)
-  ssot set <path>         Move the SSOT to a new location              (M6)
-  annotate                Backfill skill provenance                    (M7)
+  adopt <harness> [skill] Adopt real skill directories into the SSOT
+  ssot set <path>         Move the SSOT to a new location
+  annotate <skill>        Record where a skill came from
 
 OPTIONS
   --to <ids|all>          Target harnesses for link (default: all)
-  --from <ids|all>        Source harnesses for unlink / adopt
+  --from <ids|all>        Source harnesses for unlink
+  --harness <id>          Scan one harness skills directory (list)
   --path <dir>            Directory for harness add (defaults to preset)
+  --create                Create a missing skills directory (harness add)
   --name <label>          Display name for the harness
+  --ssot <dir>            Adopt an existing SSOT during init
+  --source <kind>         Provenance for annotate: local | git | market | plugin
+  --origin <text>         Upstream identifier for annotate
   --all                   Apply to every skill
   --replace               Redirect links that bypass the anchor (link)
+  --diff                  Show both versions of a conflicting skill (adopt)
+  --keep <ssot|harness>   Which side wins when adopting a conflict
   --fix                   Apply repairs (doctor)
+  --yes                   Confirm converting a real-directory anchor (ssot set)
+  --keep-old              Keep the old SSOT as a renamed backup (ssot set)
   --dry-run               Print the plan, change nothing
   --json                  Machine-readable output
   --matrix                Skill x harness matrix (list)
@@ -81,8 +93,31 @@ export function runCli(argv: readonly string[], env: Env): RunOutcome {
   try {
     return dispatch(args.command, args, env);
   } catch (err) {
-    return { stdout: '', stderr: formatError(err), exitCode: exitCodeOf(err) };
+    const error = toSkilloError(err);
+    if (hasFlag(args, 'json')) {
+      return {
+        stdout: `${JSON.stringify(
+          {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message,
+              ...(error.hint === undefined ? {} : { hint: error.hint }),
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        stderr: '',
+        exitCode: error.exitCode,
+      };
+    }
+    return { stdout: '', stderr: formatError(err), exitCode: error.exitCode };
   }
+}
+
+function jsonOutput(data: unknown, warnings: readonly string[] = []): string {
+  return `${JSON.stringify({ ok: true, data, warnings }, null, 2)}\n`;
 }
 
 function dispatch(command: string, args: ParsedArgs, env: Env): RunOutcome {
@@ -102,9 +137,9 @@ function dispatch(command: string, args: ParsedArgs, env: Env): RunOutcome {
     case 'harness':
       return harnessCommand(args, env);
     case 'annotate':
-      throw usageError('`annotate` is not implemented yet', 'this version ships init / list / link / unlink / doctor / adopt');
+      return annotateCommand(args, env);
     case 'ssot':
-      throw usageError('`ssot set` is not implemented yet', 'this version ships init / list / link / unlink / doctor / adopt');
+      return ssotCommand(args, env);
     default:
       throw usageError(`unknown command: ${command}`, 'run skillo --help to see available commands');
   }
@@ -115,6 +150,9 @@ function dispatch(command: string, args: ParsedArgs, env: Env): RunOutcome {
 function initCommand(args: ParsedArgs, env: Env): RunOutcome {
   const ssot = stringFlag(args, 'ssot');
   const result = runInit({ env, ...(ssot === undefined ? {} : { ssot }) });
+  if (hasFlag(args, 'json')) {
+    return { stdout: jsonOutput(result), stderr: '', exitCode: EXIT.OK };
+  }
   const palette = makePalette(colourEnabled(process.stdout));
 
   const lines: string[] = [];
@@ -151,10 +189,18 @@ function initCommand(args: ParsedArgs, env: Env): RunOutcome {
 /* ─────────────────────────────── list ──────────────────────────────── */
 
 function listCommand(args: ParsedArgs, env: Env): RunOutcome {
+  // `--harness` with no value parses as a boolean; treating it as absent would
+  // silently print the normal overview instead of the directory that was asked for.
+  if (args.flags.get('harness') === true) {
+    throw usageError('--harness needs a harness id', 'example: skillo list --harness workbuddy');
+  }
+  const harness = stringFlag(args, 'harness');
+
   const outcome = runList({
     env,
     matrix: hasFlag(args, 'matrix'),
     json: hasFlag(args, 'json'),
+    ...(harness === undefined ? {} : { harness }),
     ...(args.positionals[0] === undefined ? {} : { skill: args.positionals[0] }),
   });
 
@@ -186,9 +232,13 @@ function linkCommand(args: ParsedArgs, env: Env): RunOutcome {
     replaceForeign: hasFlag(args, 'replace'),
   });
 
+  if (hasFlag(args, 'json')) {
+    return { stdout: jsonOutput({ items: outcome.items, dryRun, warnings: outcome.warnings }), stderr: '', exitCode: outcome.exitCode };
+  }
+
   const palette = makePalette(colourEnabled(process.stdout));
   return {
-    stdout: renderLinkItems(outcome.items, palette, dryRun ? 'link (dry-run)' : 'link'),
+    stdout: renderLinkItems(outcome.items, palette, dryRun ? 'link (dry-run)' : 'link', outcome.warnings),
     stderr: '',
     exitCode: outcome.exitCode,
   };
@@ -203,75 +253,24 @@ function unlinkCommand(args: ParsedArgs, env: Env): RunOutcome {
     dryRun,
   });
 
+  if (hasFlag(args, 'json')) {
+    return { stdout: jsonOutput({ items: outcome.items, dryRun, warnings: outcome.warnings }), stderr: '', exitCode: outcome.exitCode };
+  }
+
   const palette = makePalette(colourEnabled(process.stdout));
   return {
-    stdout: renderLinkItems(outcome.items, palette, dryRun ? 'unlink (dry-run)' : 'unlink'),
+    stdout: renderLinkItems(outcome.items, palette, dryRun ? 'unlink (dry-run)' : 'unlink', outcome.warnings),
     stderr: '',
     exitCode: outcome.exitCode,
   };
 }
 
-function renderLinkItems(items: readonly LinkItem[], palette: Palette, title: string): string {
-  const lines: string[] = [];
-  lines.push(palette.bold(title));
-
-  const byHarness = new Map<string, LinkItem[]>();
-  for (const item of items) {
-    const bucket = byHarness.get(item.harness) ?? [];
-    bucket.push(item);
-    byHarness.set(item.harness, bucket);
-  }
-
-  const totals = new Map<string, number>();
-
-  for (const [harness, bucket] of byHarness) {
-    const counts = new Map<string, number>();
-    for (const item of bucket) counts.set(item.action, (counts.get(item.action) ?? 0) + 1);
-
-    const parts: string[] = [];
-    for (const [action, count] of counts) {
-      totals.set(action, (totals.get(action) ?? 0) + count);
-      const label = `${count} ${action}`;
-      if (action === 'created' || action === 'unlinked' || action === 'replaced-broken') {
-        parts.push(palette.ok(label));
-      } else if (action === 'conflict' || action === 'failed' || action === 'refused-invalid') {
-        parts.push(palette.error(label));
-      } else {
-        parts.push(palette.dim(label));
-      }
-    }
-
-    lines.push(`  ${palette.accent(harness.padEnd(16))}${parts.join(palette.dim(' · '))}`);
-
-    for (const item of bucket) {
-      if (item.action === 'conflict' || item.action === 'failed' || item.action === 'refused-invalid') {
-        lines.push(`    ${palette.error('!')} ${item.skill} ${palette.dim(item.detail ?? '')}`);
-      }
-    }
-  }
-
-  if (items.length === 0) {
-    lines.push(palette.dim('  nothing to do'));
-  }
-
-  lines.push('');
-  const summary = [...totals.entries()].map(([action, count]) => `${count} ${action}`).join(' · ');
-  lines.push(palette.dim(`  total ${summary === '' ? 'no changes' : summary}`));
-
-  if ((totals.get('conflict') ?? 0) > 0) {
-    lines.push('');
-    lines.push(palette.dim('  real directories need `skillo adopt` to enter the SSOT (doctor never deletes them)'));
-  }
-
-  return `${lines.join('\n')}\n`;
-}
-
 /* ─────────────────────────────── adopt ─────────────────────────────── */
 
 function adoptCommand(args: ParsedArgs, env: Env): RunOutcome {
-  const from = stringFlag(args, 'from');
-  if (from === undefined) {
-    throw usageError('missing --from <harness>', 'example: skillo adopt --from workbuddy');
+  const [harness, ...skills] = args.positionals;
+  if (harness === undefined) {
+    throw usageError('missing <harness>', 'example: skillo adopt workbuddy');
   }
 
   const keepRaw = stringFlag(args, 'keep');
@@ -282,102 +281,23 @@ function adoptCommand(args: ParsedArgs, env: Env): RunOutcome {
   const dryRun = hasFlag(args, 'dry-run');
   const outcome = runAdopt({
     env,
-    from,
-    skills: args.positionals.length === 0 ? null : args.positionals,
+    harness,
+    skills: skills.length === 0 ? null : skills,
     keep: keepRaw ?? null,
     dryRun,
     diff: hasFlag(args, 'diff'),
   });
 
+  if (hasFlag(args, 'json')) {
+    return { stdout: jsonOutput({ harness, items: outcome.items, dryRun }), stderr: '', exitCode: outcome.exitCode };
+  }
+
   const palette = makePalette(colourEnabled(process.stdout));
   return {
-    stdout: renderAdopt(outcome.items, palette, from, dryRun),
+    stdout: renderAdopt(outcome.items, palette, harness, dryRun),
     stderr: '',
     exitCode: outcome.exitCode,
   };
-}
-
-function renderAdopt(
-  items: readonly AdoptItem[],
-  palette: Palette,
-  from: string,
-  dryRun: boolean,
-): string {
-  const lines: string[] = [];
-  lines.push(palette.bold(`adopt from ${from}${dryRun ? ' (dry-run)' : ''}`));
-  lines.push('');
-
-  if (items.length === 0) {
-    lines.push(palette.dim('  no real directories to adopt'));
-    return `${lines.join('\n')}\n`;
-  }
-
-  const done = items.filter((item) => item.action.startsWith('adopted'));
-  const conflicts = items.filter((item) => item.action === 'conflict');
-  const diffs = items.filter((item) => item.action === 'diff');
-  const skipped = items.filter((item) => item.action === 'skipped');
-  const failed = items.filter((item) => item.action === 'failed');
-
-  if (done.length > 0) {
-    lines.push(palette.ok(`  ✓ adopted (${done.length})`));
-    for (const item of done) {
-      lines.push(`    ${padDisplay(item.skill, 28)}${palette.dim(item.action)}`);
-      if (item.detail !== undefined) lines.push(`      ${palette.dim(item.detail)}`);
-    }
-    lines.push('');
-  }
-
-  if (conflicts.length > 0) {
-    lines.push(palette.error(`  ! conflict (${conflicts.length})  pass --keep to continue`));
-    for (const item of conflicts) {
-      lines.push(`    ${padDisplay(item.skill, 28)}${palette.dim(item.detail ?? '')}`);
-    }
-    lines.push('');
-    lines.push(palette.dim('  to resolve a conflict'));
-    const first = conflicts[0]?.skill ?? '<skill>';
-    lines.push(palette.dim(`    skillo adopt --from ${from} ${first} --diff`));
-    lines.push(palette.dim(`    skillo adopt --from ${from} ${first} --keep ssot`));
-    lines.push(palette.dim(`    skillo adopt --from ${from} ${first} --keep harness`));
-    lines.push('');
-  }
-
-  if (diffs.length > 0) {
-    for (const item of diffs) {
-      lines.push(palette.bold(`  diff ${item.skill}`));
-      lines.push(indent(item.diff ?? '', '    '));
-      lines.push('');
-    }
-  }
-
-  if (skipped.length > 0) {
-    lines.push(palette.dim(`  · skipped ${skipped.length}`));
-    for (const item of skipped) {
-      lines.push(palette.dim(`    ${item.skill} — ${item.detail ?? ''}`));
-    }
-    lines.push('');
-  }
-
-  if (failed.length > 0) {
-    lines.push(palette.error(`  ✗ failed ${failed.length}`));
-    for (const item of failed) {
-      lines.push(`    ${item.skill} — ${item.detail ?? ''}`);
-    }
-    lines.push('');
-  }
-
-  const trashPaths = items.filter((item) => item.trashPath !== undefined);
-  if (trashPaths.length > 0) {
-    lines.push(palette.dim('  replaced directories were moved to ~/.skillo/.trash/ and can be recovered by hand'));
-  }
-
-  return `${lines.join('\n')}\n`;
-}
-
-function indent(text: string, prefix: string): string {
-  return text
-    .split('\n')
-    .map((line) => `${prefix}${line}`)
-    .join('\n');
 }
 
 /* ────────────────────────────── harness ────────────────────────────── */
@@ -388,8 +308,13 @@ function harnessCommand(args: ParsedArgs, env: Env): RunOutcome {
 
   switch (sub) {
     case undefined:
-    case 'list':
-      return { stdout: renderHarnessList(env, palette), stderr: '', exitCode: EXIT.OK };
+    case 'list': {
+      const result = runHarnessList(env);
+      if (hasFlag(args, 'json')) {
+        return { stdout: jsonOutput(result), stderr: '', exitCode: EXIT.OK };
+      }
+      return { stdout: renderHarnessList(result, env, palette), stderr: '', exitCode: EXIT.OK };
+    }
 
     case 'add': {
       const id = args.positionals[1];
@@ -406,7 +331,12 @@ function harnessCommand(args: ParsedArgs, env: Env): RunOutcome {
         id,
         ...(explicitPath === undefined ? {} : { path: explicitPath }),
         ...(explicitName === undefined ? {} : { name: explicitName }),
+        createDir: hasFlag(args, 'create'),
       });
+
+      if (hasFlag(args, 'json')) {
+        return { stdout: jsonOutput(result), stderr: '', exitCode: EXIT.OK };
+      }
 
       const lines = [
         `${palette.ok('✓')} added ${palette.accent(result.harness.id)} → ${toDisplay(result.harness.path, env)}`,
@@ -427,6 +357,9 @@ function harnessCommand(args: ParsedArgs, env: Env): RunOutcome {
       if (id === undefined) throw usageError('missing harness id', 'example: skillo harness remove cursor');
 
       const result = runHarnessRemove(env, id);
+      if (hasFlag(args, 'json')) {
+        return { stdout: jsonOutput(result), stderr: '', exitCode: EXIT.OK };
+      }
       const lines = [`${palette.ok('✓')} removed ${result.harness.id} (unregistered only, no files touched)`];
       if (result.leftoverEntries > 0) {
         lines.push(
@@ -443,61 +376,67 @@ function harnessCommand(args: ParsedArgs, env: Env): RunOutcome {
   }
 }
 
-function renderHarnessList(env: Env, palette: Palette): string {
-  const result = runHarnessList(env);
-  const lines: string[] = [];
-  lines.push(palette.bold('harness'));
-  lines.push('');
+/* ────────────────────────────── annotate ───────────────────────────── */
 
-  lines.push(palette.dim(`  registered (${result.registered.length})`));
-  for (const probe of result.registered) {
-    const marker = !probe.exists
-      ? palette.error('✗')
-      : probe.native
-        ? palette.ok('≡')
-        : probe.isLink
-          ? palette.warn('~')
-          : palette.ok('✓');
-    // For a native harness, the directory being a link is expected — it IS the
-    // anchor. Warning about it would contradict the `≡` marker.
-    const note = !probe.exists
-      ? palette.error('directory missing')
-      : probe.native
-        ? palette.dim('reads the anchor natively')
-        : probe.isLink
-          ? palette.warn(`directory itself is a link → ${probe.linkTarget ?? '?'}`)
-          : '';
-    lines.push(
-      `    ${marker} ${padDisplay(probe.harness.id, 18)}${palette.dim(toDisplay(probe.harness.path, env))} ${note}`,
+function annotateCommand(args: ParsedArgs, env: Env): RunOutcome {
+  const skill = args.positionals[0];
+  if (skill === undefined) {
+    throw usageError(
+      'missing skill name',
+      'example: skillo annotate my-skill --source git --origin owner/repo',
     );
   }
 
-  if (result.addable.length > 0) {
-    lines.push('');
-    lines.push(palette.dim(`  addable (${result.addable.length})  directory exists but is not registered`));
-    for (const entry of result.addable) {
-      lines.push(`    ${padDisplay(entry.id, 18)}${palette.dim(toDisplay(entry.path, env))}`);
-    }
-    lines.push(palette.dim(`    skillo harness add ${result.addable[0]?.id ?? '<id>'}`));
+  const source = stringFlag(args, 'source');
+  const origin = stringFlag(args, 'origin');
+  const outcome = runAnnotate({
+    env,
+    skill,
+    ...(source === undefined ? {} : { source }),
+    ...(origin === undefined ? {} : { origin }),
+  });
+
+  if (hasFlag(args, 'json')) {
+    return { stdout: jsonOutput(outcome), stderr: '', exitCode: EXIT.OK };
   }
 
-  if (result.nativePresets.length > 0) {
-    lines.push('');
-    lines.push(palette.dim(`  read the anchor natively (${result.nativePresets.length})  nothing to add, all skills already visible`));
-    lines.push(palette.dim(`    ${result.nativePresets.join(', ')}`));
+  const palette = makePalette(colourEnabled(process.stdout));
+  const lines = [`${palette.ok('✓')} annotated ${palette.accent(outcome.skill)}`];
+  lines.push(`  ${palette.dim('source')} ${outcome.source}`);
+  if (outcome.origin !== null) lines.push(`  ${palette.dim('origin')} ${outcome.origin}`);
+  return { stdout: `${lines.join('\n')}\n`, stderr: '', exitCode: EXIT.OK };
+}
+
+/* ─────────────────────────────── ssot ──────────────────────────────── */
+
+function ssotCommand(args: ParsedArgs, env: Env): RunOutcome {
+  const sub = args.positionals[0];
+  if (sub !== 'set') {
+    throw usageError(
+      `unknown ssot subcommand: ${sub ?? '(none)'}`,
+      'available: skillo ssot set <path>',
+    );
   }
 
-  if (result.absent.length > 0) {
-    lines.push('');
-    lines.push(palette.dim(`  built-in presets not installed on this machine (${result.absent.length})`));
-    lines.push(palette.dim(`    ${result.absent.join(', ')}`));
+  const target = args.positionals[1];
+  if (target === undefined) {
+    throw usageError('missing target path', 'example: skillo ssot set D:\\Projects\\Skills-moved');
   }
 
-  lines.push('');
-  lines.push(palette.dim('  custom: skillo harness add <id> --path <dir>'));
-  lines.push(palette.dim('  14 built-in presets are available; add one with skillo harness add <id>'));
+  const outcome = runSsotSet({
+    env,
+    target,
+    dryRun: hasFlag(args, 'dry-run'),
+    yes: hasFlag(args, 'yes'),
+    keepOld: hasFlag(args, 'keep-old'),
+  });
 
-  return `${lines.join('\n')}\n`;
+  if (hasFlag(args, 'json')) {
+    return { stdout: jsonOutput(outcome.result), stderr: '', exitCode: outcome.exitCode };
+  }
+
+  const palette = makePalette(colourEnabled(process.stdout));
+  return { stdout: renderSsotSet(outcome.result, env, palette), stderr: '', exitCode: outcome.exitCode };
 }
 
 /* ────────────────────────────── doctor ─────────────────────────────── */
@@ -510,6 +449,10 @@ function doctorCommand(args: ParsedArgs, env: Env): RunOutcome {
     dryRun: hasFlag(args, 'dry-run'),
     ...(args.positionals[0] === undefined ? {} : { target: args.positionals[0] }),
   });
+
+  if (hasFlag(args, 'json')) {
+    return { stdout: jsonOutput(outcome), stderr: '', exitCode: outcome.exitCode };
+  }
 
   const palette = makePalette(colourEnabled(process.stdout));
   const lines: string[] = [];
@@ -532,18 +475,6 @@ function doctorCommand(args: ParsedArgs, env: Env): RunOutcome {
   }
 
   return { stdout: `${lines.join('\n')}\n`, stderr: '', exitCode: outcome.exitCode };
-}
-
-function renderFinding(finding: DoctorFinding, palette: Palette): string {
-  const marker =
-    finding.severity === 'ok'
-      ? palette.ok('✓')
-      : finding.severity === 'warn'
-        ? palette.warn('!')
-        : palette.error('✗');
-  const head = `  ${marker} ${palette.accent(finding.scope.padEnd(14))}${finding.message}`;
-  const tail = finding.detail === undefined ? '' : `\n      ${palette.dim(finding.detail)}`;
-  return head + tail;
 }
 
 /* ────────────────────────────── helpers ────────────────────────────── */

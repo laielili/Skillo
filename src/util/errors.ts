@@ -56,8 +56,8 @@ export class SkilloError extends Error {
   }
 }
 
-export function usageError(message: string, hint?: string): SkilloError {
-  return new SkilloError('USAGE', message, { hint });
+export function usageError(message: string, hint?: string, details?: string): SkilloError {
+  return new SkilloError('USAGE', message, { hint, details });
 }
 
 export function conflictError(message: string, hint?: string, details?: string): SkilloError {

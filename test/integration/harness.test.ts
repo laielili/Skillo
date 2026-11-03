@@ -80,6 +80,45 @@ describe('skillo harness list', () => {
       box.cleanup();
     }
   });
+
+  test('prints harnesses that read the anchor directly on one line at the top', () => {
+    const box = makeBox();
+    try {
+      init(box);
+      const result = runCli(['harness', 'list'], box.env);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.match(result.stdout, /^harness\n\nHarnesses linked to Anchor directly: Codex$/m);
+      assert.doesNotMatch(result.stdout, /read the anchor natively \(/);
+
+      const directIndex = result.stdout.indexOf('Harnesses linked to Anchor directly:');
+      const registeredIndex = result.stdout.indexOf('registered (');
+      assert.ok(directIndex >= 0 && directIndex < registeredIndex, 'the line belongs above the registry');
+    } finally {
+      box.cleanup();
+    }
+  });
+
+  test('truncates the direct line after eight names', () => {
+    const box = makeBox();
+    try {
+      init(box);
+      const anchor = path.join(box.env.home, '.agents', 'skills');
+      for (let index = 1; index <= 9; index += 1) {
+        const added = runCli(['harness', 'add', `native-${index}`, '--path', anchor], box.env);
+        assert.equal(added.exitCode, 0, added.stderr);
+      }
+
+      const result = runCli(['harness', 'list'], box.env);
+      const line = result.stdout.split('\n').find((entry) => entry.startsWith('Harnesses linked to Anchor directly:'));
+      assert.ok(line !== undefined);
+      assert.ok(line.includes('…'), 'more than eight names must end with an ellipsis');
+      assert.ok(line.includes('native-8'));
+      assert.ok(!line.includes('native-9'));
+      assert.ok(!line.includes('Codex'));
+    } finally {
+      box.cleanup();
+    }
+  });
 });
 
 describe('skillo harness add', () => {
@@ -88,7 +127,7 @@ describe('skillo harness add', () => {
     try {
       init(box);
 
-      const result = runCli(['harness', 'add', 'cursor'], box.env);
+      const result = runCli(['harness', 'add', 'cursor', '--create'], box.env);
       assert.equal(result.exitCode, 0, result.stderr);
       assert.match(result.stdout, /added/);
 
@@ -108,7 +147,7 @@ describe('skillo harness add', () => {
       init(box);
       const custom = path.join(box.root, 'my-tool', 'skills');
 
-      const result = runCli(['harness', 'add', 'my-tool', '--path', custom, '--name', 'My Tool'], box.env);
+      const result = runCli(['harness', 'add', 'my-tool', '--path', custom, '--name', 'My Tool', '--create'], box.env);
       assert.equal(result.exitCode, 0, result.stderr);
 
       const entry = box.config().harnesses.find((harness) => harness.id === 'my-tool');
@@ -127,11 +166,24 @@ describe('skillo harness add', () => {
       init(box);
       const custom = path.join(box.root, 'cursor-alt');
 
-      const result = runCli(['harness', 'add', 'cursor', '--path', custom], box.env);
+      const result = runCli(['harness', 'add', 'cursor', '--path', custom, '--create'], box.env);
       assert.equal(result.exitCode, 0, result.stderr);
 
       const entry = box.config().harnesses.find((harness) => harness.id === 'cursor');
       assert.equal(entry?.preset, 'overridden');
+    } finally {
+      box.cleanup();
+    }
+  });
+
+  test('refuses to create a missing directory without --create', () => {
+    const box = makeBox();
+    try {
+      init(box);
+      const result = runCli(['harness', 'add', 'cursor'], box.env);
+      assert.equal(result.exitCode, 2);
+      assert.match(result.stderr, /does not exist/);
+      assert.match(result.stderr, /--create/);
     } finally {
       box.cleanup();
     }
@@ -186,7 +238,7 @@ describe('skillo harness add', () => {
       init(box);
 
       const custom = path.join(box.root, 'brand-new', 'skills');
-      runCli(['harness', 'add', 'brand-new', '--path', custom], box.env);
+      runCli(['harness', 'add', 'brand-new', '--path', custom, '--create'], box.env);
       const linked = runCli(['link', 'alpha', '--to', 'brand-new'], box.env);
       assert.equal(linked.exitCode, 0, linked.stderr);
       assert.ok(fs.lstatSync(path.join(custom, 'alpha')).isSymbolicLink());

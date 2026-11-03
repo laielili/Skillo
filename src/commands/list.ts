@@ -6,7 +6,7 @@
  * state exists to disagree with reality.
  */
 
-import type { Env } from '../types.ts';
+import type { Env, SkilloConfig } from '../types.ts';
 import { detectAnchor } from '../core/anchor.ts';
 import { readConfig } from '../core/config.ts';
 import { isDirectory } from '../core/fs-safe.ts';
@@ -15,27 +15,36 @@ import {
   buildRelations,
   countGroups,
   inspectHarnesses,
+  isNativeHarness,
   nativeHarnessIds,
+  scanHarnessEntries,
   type SkillRelations,
 } from '../core/relation.ts';
-import { scanSkills } from '../core/scan.ts';
+import { scanSkills, ssotEntryNames } from '../core/scan.ts';
 import { resolveSources } from '../core/source.ts';
 import {
   colourEnabled,
   makePalette,
   renderDetail,
+  renderHarnessView,
   renderMatrix,
   renderOverview,
+  detailJson,
+  harnessJson,
   listJson,
-  type Palette,
+  type HarnessView,
   type ListView,
+  type Palette,
 } from '../cli/output.ts';
 import { EXIT, envError, usageError, type ExitCode } from '../util/errors.ts';
+import { assertNever } from '../util/assert.ts';
 
 export interface ListInput {
   env: Env;
   /** Restrict to a single skill and render its detail view. */
   skill?: string;
+  /** Render one harness's own directory instead of the SSOT's distribution. */
+  harness?: string;
   matrix?: boolean;
   json?: boolean;
   palette?: Palette;
@@ -81,10 +90,17 @@ export function runList(input: ListInput): ListOutcome {
     case 'absent':
       anchorNote = 'anchor does not exist, every link will break';
       break;
-    default:
+    case 'junction':
       if (anchor.ssotRoot !== null && !samePath(anchor.ssotRoot, config.ssotRoot)) {
         anchorNote = `anchor points at ${anchor.ssotRoot}, which disagrees with the config`;
       }
+      break;
+    default:
+      return assertNever(anchor.mode, 'unhandled anchor mode');
+  }
+
+  if (input.harness !== undefined) {
+    return harnessDirectoryView(input, config, anchorReal, anchorNote, palette);
   }
 
   const scan = scanSkills(config.ssotRoot);
@@ -107,7 +123,10 @@ export function runList(input: ListInput): ListOutcome {
       throw usageError(`skill not found: ${input.skill}`, suggest(input.skill, rows));
     }
     return {
-      text: input.json === true ? jsonOf(target) : renderDetail(target, { env, palette }),
+      text:
+        input.json === true
+          ? `${JSON.stringify(detailJson(target, config.anchor), null, 2)}\n`
+          : renderDetail(target, { env, palette, anchorPath: config.anchor }),
       exitCode: EXIT.OK,
     };
   }
@@ -135,24 +154,64 @@ export function runList(input: ListInput): ListOutcome {
   return { text: renderOverview(view, { env, palette }), exitCode: EXIT.OK };
 }
 
-function jsonOf(row: SkillRelations): string {
-  return `${JSON.stringify(
-    {
-      ok: true,
-      data: {
-        name: row.skill.name,
-        path: row.skill.path,
-        source: row.skill.source,
-        origin: row.skill.origin,
-        description: row.skill.description,
-        group: row.group,
-        cells: row.cells.map((cell) => ({ harness: cell.harnessId, state: cell.state })),
-      },
-      warnings: [],
-    },
-    null,
-    2,
-  )}\n`;
+/**
+ * `skillo list --harness <id>`
+ *
+ * The inverse of the default view: it reads the harness's own directory, so the
+ * skills the SSOT has never heard of are visible. That is how an installation
+ * made outside Skillo gets discovered, and `adopt` is what it feeds.
+ */
+function harnessDirectoryView(
+  input: ListInput,
+  config: SkilloConfig,
+  anchorReal: string | null,
+  anchorNote: string | null,
+  palette: Palette,
+): ListOutcome {
+  if (input.skill !== undefined) {
+    throw usageError(
+      '--harness lists a whole directory, not a single skill',
+      'drop the skill name, or run skillo list <skill> without --harness',
+    );
+  }
+  if (input.matrix === true) {
+    throw usageError(
+      '--harness cannot be combined with --matrix',
+      'skillo list --matrix compares every harness at once',
+    );
+  }
+
+  const harness = config.harnesses.find((candidate) => candidate.id === input.harness);
+  if (harness === undefined) {
+    throw usageError(
+      `unknown harness: ${input.harness}`,
+      'skillo harness list shows the registered ids',
+      `registered: ${config.harnesses.map((candidate) => candidate.id).join(', ') || '(none)'}`,
+    );
+  }
+
+  const native = isNativeHarness(harness, config.anchor, anchorReal);
+  const notes = inspectHarnesses([harness], native ? [harness.id] : []).map((note) => note.message);
+  if (!harness.enabled) notes.push(`${harness.id} is disabled, so link and list ignore it`);
+  if (anchorNote !== null) notes.push(anchorNote);
+
+  const view: HarnessView = {
+    harness,
+    ssotRoot: config.ssotRoot,
+    native,
+    notes,
+    entries: scanHarnessEntries({
+      harness,
+      anchorPath: config.anchor,
+      anchorReal,
+      ssotNames: ssotEntryNames(config.ssotRoot),
+    }),
+  };
+
+  if (input.json === true) {
+    return { text: `${JSON.stringify(harnessJson(view), null, 2)}\n`, exitCode: EXIT.OK };
+  }
+  return { text: renderHarnessView(view, { env: input.env, palette }), exitCode: EXIT.OK };
 }
 
 /** Cheap suggestion: names sharing a prefix or a substring. */

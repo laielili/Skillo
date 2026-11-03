@@ -48,6 +48,19 @@ export function padDisplay(text: string, width: number): string {
   return gap > 0 ? text + ' '.repeat(gap) : text;
 }
 
+/** Human-readable byte count, e.g. `45.2 MiB`. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(1)} ${units[unit]}`;
+}
+
 /** Truncate to a display width, appending an ellipsis when cut. */
 export function truncateDisplay(text: string, maxWidth: number, ellipsis = '…'): string {
   if (displayWidth(text) <= maxWidth) return text;

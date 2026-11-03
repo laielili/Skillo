@@ -23,7 +23,8 @@ import {
   ensureDir,
   isFile,
   lstatOrNull,
-  moveToTrash,
+  moveToStaging,
+  purgeTree,
   realpathOrNull,
   removeJunction,
   treeSize,
@@ -66,7 +67,7 @@ function sandbox(): Sandbox {
     },
     cleanup(): void {
       // Sandbox teardown only. Production code may never call rmSync recursively
-      // except inside the trash directory.
+      // except inside the staging directory.
       fs.rmSync(root, { recursive: true, force: true });
     },
   };
@@ -389,17 +390,47 @@ describe('copyTree', () => {
   });
 });
 
-describe('moveToTrash', () => {
+describe('moveToStaging', () => {
   test('moves instead of deleting and reports the destination', () => {
     const box = sandbox();
     try {
       const victim = box.makeSkill('alpha');
-      const trash = path.join(box.root, '.trash');
+      const staging = path.join(box.root, '.tmp');
 
-      const dest = moveToTrash(victim, trash);
+      const dest = moveToStaging(victim, staging);
 
       assert.equal(lstatOrNull(victim), null, 'original location is now empty');
-      assert.ok(isFile(path.join(dest, 'SKILL.md')), 'content survives in trash');
+      assert.ok(isFile(path.join(dest, 'SKILL.md')), 'content survives in staging');
+    } finally {
+      box.cleanup();
+    }
+  });
+
+  test('the label names the side without hiding the skill', () => {
+    const box = sandbox();
+    try {
+      const victim = box.makeSkill('grill-me');
+      const staging = path.join(box.root, '.tmp');
+
+      const dest = moveToStaging(victim, staging, 'ssot');
+
+      assert.equal(path.basename(dest).endsWith('-ssot-grill-me'), true, path.basename(dest));
+    } finally {
+      box.cleanup();
+    }
+  });
+
+  test('a staged package can be purged inside the staging boundary', () => {
+    const box = sandbox();
+    try {
+      const victim = box.makeSkill('alpha');
+      const staging = path.join(box.root, '.tmp');
+      const dest = moveToStaging(victim, staging, 'harness');
+
+      purgeTree(dest, staging);
+
+      assert.equal(fs.existsSync(dest), false, 'verification success empties staging');
+      assert.ok(fs.existsSync(staging), 'the staging directory itself survives');
     } finally {
       box.cleanup();
     }

@@ -25,10 +25,12 @@ const BOOLEAN_LONG: ReadonlySet<string> = new Set([
   'dry-run',
   'matrix',
   'all',
-  'force',
+  'replace',
+  'diff',
   'fix',
-  'verbose',
   'yes',
+  'keep-old',
+  'create',
 ]);
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {

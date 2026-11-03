@@ -6,7 +6,7 @@
 
 Every agentic tool keeps its own `skills/` directory, so one skill gets copied N times and drifts N ways — and nobody notices when a link breaks. Skillo fixes that with a single source of truth plus per-skill Windows junctions: skill content lives in exactly one place, harnesses read it through links, and one edit takes effect everywhere.
 
-Compatible on Windows systems. Available commands: `init` / `list` / `link` / `unlink` / `doctor` / `harness` / `adopt`; `ssot set` and `annotate` are not implemented yet.
+Compatible on Windows systems. Available commands: `init` / `list` / `link` / `unlink` / `doctor` / `harness` / `adopt` / `ssot set` / `annotate`.
 
 Design documents live in `plan/PRD.md`, `plan/SPEC.md` and `plan/TECH_DESIGN.md` (all in Chinese).
 
@@ -61,7 +61,7 @@ Other scripts:
 | Command         | Purpose                                                               |
 | --------------- | --------------------------------------------------------------------- |
 | `npm run check` | `tsc --noEmit` full type check                                        |
-| `npm test`      | unit + integration tests (120 cases), each in a sandboxed `HOME`      |
+| `npm test`      | unit + integration tests (150 cases), each in a sandboxed `HOME`      |
 | `npm link`      | register the local source as a global `skillo`, shadowing the npm one |
 
 Note: npm 12 blocks install scripts such as `prepare` by default, so `npm link` does not rebuild — after installing you are still running whatever was in `dist/` **at that moment**. After changing the source, either run `npm run build` first, or just use `npm run dev --` while developing. Uninstall with `npm unlink -g skillo`.
@@ -82,13 +82,17 @@ npm 12 blocks `prepare`, so do not expect `npm publish` to build for you — run
 ```
 skillo init                 create the anchor ~/.agents/skills, detect installed harnesses
 skillo list [skill]         skill x harness distribution; --matrix for the matrix view
+skillo list --harness <id>  what one harness holds on its own, un-adopted skills included
 skillo link [skill...]      distribute to harnesses; defaults to all skills x all harnesses
 skillo unlink [skill...]    remove distribution; deletes links only, never content
 skillo doctor [harness]     diagnose broken links / conflicts / anchor problems; --fix repairs
-skillo adopt --from <id>    adopt real skill directories from a harness into the SSOT
+skillo harness [list]       registered / addable harnesses; native ones appear on one line
+skillo adopt <id> [skill]   adopt real skill directories from a harness into the SSOT
+skillo ssot set <path>      move the SSOT; copy → hash verify → repoint the anchor
+skillo annotate <skill>     record where a skill came from (--source / --origin)
 ```
 
-Common options: `--dry-run` prints the plan only, `--json` for machine-readable output, `-h` / `-v`. `list --json` gives machine-readable output.
+Common options: `--dry-run` prints the plan only, `--json` for machine-readable output (every command), `-h` / `-v`.
 
 ## Doctor
 
@@ -113,7 +117,19 @@ The repair set is deliberately narrow — exactly four things: **detach a whole-
 
 What it does **not** do matters just as much: it does not rebuild the anchor (rebuilding an empty one over a broken link makes skills look like they vanished); it deletes no skill content; it never widens your distribution — repairs for broken or anchor-bypassing links touch only the affected skills, and anything you deliberately left undistributed is not distributed as a side effect (the one exception is a whole-directory junction, which is rebuilt wholesale by nature); it leaves entries it did not create alone.
 
-Two situations need a human: a real directory occupying the same name, which you resolve with `skillo adopt --from <harness>` to bring it into the SSOT; and a broken anchor, where you restore the original path (mount the drive again if it is unmounted) — doctor only tells you where it used to point. A **file** occupying the same name is likewise never deleted by Skillo; handle it by hand.
+Two situations need a human: a real directory occupying the same name, which you resolve with `skillo adopt <harness>` to bring it into the SSOT; and a broken anchor, where you restore the original path (mount the drive again if it is unmounted) — doctor only tells you where it used to point. A **file** occupying the same name is likewise never deleted by Skillo; handle it by hand.
+
+## What a harness holds on its own
+
+`skillo list` walks the SSOT outward, so a skill installed by a tool that Skillo never mediated simply has no row. `skillo list --harness <id>` walks the other direction and reads that harness's own skills directory: every entry is bucketed as `adoptable` (a real directory the SSOT does not have), `needs a decision` (a real directory whose name the SSOT already holds), `needs attention` (broken / foreign / taken by a file), or `linked`. The footer names the command that closes the gap:
+
+```
+skillo adopt workbuddy [<skill>] brings the real directories into the SSOT and leaves a link behind
+```
+
+## Moving the SSOT
+
+`skillo ssot set D:\new\location` copies the SSOT, verifies every file by hash, then re-points the anchor, updates the config, and deletes the old tree — an SSOT exists in exactly one place. Pass `--keep-old` to rename it to `<old>.migrated-<timestamp>` instead. `--dry-run` prints the plan. A non-empty target is refused; a real-directory anchor requires `--yes`.
 
 ## Layout
 
@@ -121,8 +137,8 @@ Two situations need a human: a real directory occupying the same name, which you
 src/
   bin/skillo.ts     process entry; only reads/writes stdout/stderr
   cli/              argument parsing, routing, coloured output
-  commands/         init / list / link / unlink / doctor / adopt / harness
-  core/             anchor detection, config persistence, scanning, relations, safe fs ops
+  commands/         init / list / link / unlink / doctor / adopt / harness / ssot / annotate
+  core/             anchor detection, config persistence, scanning, relations, migration, safe fs ops
   presets/          default harness path table
   util/             errors, frontmatter, hashing, text
 test/
@@ -130,4 +146,4 @@ test/
   integration/      full CLI runs inside a temporary HOME
 ```
 
-Config lives in `~/.skillo/config.json` (written atomically; a corrupt file is reported rather than overwritten); directories replaced by `adopt` are moved to `~/.skillo/.trash/`.
+Config lives in `~/.skillo/config.json` (written atomically; a corrupt file is reported rather than overwritten). `adopt` stages the directory it is about to replace in `~/.skillo/.tmp/`, verifies the transfer by hash, and **deletes the staged package** once the link reads correctly — a second copy of the SSOT is the redundancy the tool exists to remove, so anything still in `.tmp/` marks a step that did not complete.

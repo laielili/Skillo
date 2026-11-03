@@ -11,10 +11,11 @@ import path from 'node:path';
 import type { Env, Harness, RelationState } from '../types.ts';
 import { detectAnchor } from '../core/anchor.ts';
 import { readConfig } from '../core/config.ts';
-import { classifyEntry, createJunction, isDirectory, removeJunction } from '../core/fs-safe.ts';
+import { classifyEntry, createJunction, isDirectory, longPathWarning, removeJunction } from '../core/fs-safe.ts';
 import { isNativeHarness } from '../core/relation.ts';
 import { scanSkills } from '../core/scan.ts';
 import { EXIT, envError, usageError, type ExitCode } from '../util/errors.ts';
+import { assertNever } from '../util/assert.ts';
 
 export type LinkAction =
   | 'created'
@@ -24,7 +25,6 @@ export type LinkAction =
   | 'replaced-broken'
   | 'conflict'
   | 'refused-invalid'
-  | 'missing-skill'
   | 'failed';
 
 export interface LinkItem {
@@ -47,7 +47,7 @@ export interface LinkInput {
 
 export interface LinkOutcome {
   items: LinkItem[];
-  dryRun: boolean;
+  warnings: string[];
   exitCode: ExitCode;
 }
 
@@ -138,6 +138,7 @@ export function runLink(input: LinkInput): LinkOutcome {
   const harnesses = resolveHarnesses(context, input.harnesses);
   const skills = resolveSkills(context, input.skills);
   const items: LinkItem[] = [];
+  const warnings = new Set<string>();
 
   for (const harness of harnesses) {
     // The harness directory itself may be a link (whole-directory wiring). In
@@ -154,11 +155,15 @@ export function runLink(input: LinkInput): LinkOutcome {
     }
 
     for (const skill of skills) {
+      for (const candidate of [path.join(harness.path, skill), path.join(context.anchorPath, skill)]) {
+        const warning = longPathWarning(candidate);
+        if (warning !== null) warnings.add(warning);
+      }
       items.push(linkOne(context, harness, skill, input));
     }
   }
 
-  return { items, dryRun: input.dryRun, exitCode: exitCodeFor(items) };
+  return { items, warnings: [...warnings], exitCode: exitCodeFor(items) };
 }
 
 function linkOne(context: Context, harness: Harness, skill: string, input: LinkInput): LinkItem {
@@ -195,7 +200,7 @@ function linkOne(context: Context, harness: Harness, skill: string, input: LinkI
         skill,
         harness: harness.id,
         action: 'conflict',
-        detail: 'a real directory is in the way; use skillo adopt to bring it into the SSOT',
+        detail: `a real directory is in the way; adopt it with skillo adopt ${harness.id} ${skill}`,
       };
 
     case 'invalid':
@@ -208,6 +213,9 @@ function linkOne(context: Context, harness: Harness, skill: string, input: LinkI
 
     case 'absent':
       break;
+
+    default:
+      return assertNever(state, 'unhandled relation state');
   }
 
   if (input.dryRun) {
@@ -248,10 +256,13 @@ export function runUnlink(input: UnlinkInput): LinkOutcome {
   const harnesses = resolveHarnesses(context, input.harnesses);
   const skills = resolveSkills(context, input.skills);
   const items: LinkItem[] = [];
+  const warnings = new Set<string>();
 
   for (const harness of harnesses) {
     for (const skill of skills) {
       const slot = path.join(harness.path, skill);
+      const warning = longPathWarning(slot);
+      if (warning !== null) warnings.add(warning);
       const state = classifyEntry(slot, {
         anchorReal: context.anchorReal,
         anchorPath: context.anchorPath,
@@ -276,8 +287,12 @@ export function runUnlink(input: UnlinkInput): LinkOutcome {
             detail: 'a file with this name; left untouched',
           });
           continue;
-        default:
+        case 'linked':
+        case 'foreign':
+        case 'broken':
           break;
+        default:
+          return assertNever(state, 'unhandled relation state');
       }
 
       if (!input.dryRun) {
@@ -298,12 +313,15 @@ export function runUnlink(input: UnlinkInput): LinkOutcome {
     }
   }
 
-  return { items, dryRun: input.dryRun, exitCode: exitCodeFor(items) };
+  return { items, warnings: [...warnings], exitCode: exitCodeFor(items) };
 }
 
 function exitCodeFor(items: readonly LinkItem[]): ExitCode {
-  const blocked = items.some(
-    (item) => item.action === 'conflict' || item.action === 'failed' || item.action === 'refused-invalid',
-  );
-  return blocked ? EXIT.PARTIAL : EXIT.OK;
+  if (items.some((item) => item.action === 'conflict' || item.action === 'refused-invalid')) {
+    return EXIT.CONFLICT;
+  }
+  if (items.some((item) => item.action === 'failed')) {
+    return EXIT.PARTIAL;
+  }
+  return EXIT.OK;
 }

@@ -3,8 +3,11 @@
  *
  * Pulls real directories out of a harness and into the SSOT, then replaces them
  * with links. This is the only command that overwrites content, so every
- * destructive step is preceded by a copy into the trash directory and followed by
- * a hash check.
+ * destructive step moves the original into the staging directory (`~/.skillo/.tmp`)
+ * first, verifies the transfer by hash, and deletes the staged package once the
+ * link reads correctly. A package left in staging is the signal that a step did
+ * not complete — keeping verified duplicates would put a second copy of the SSOT
+ * where there is supposed to be exactly one.
  *
  * Collisions are never resolved automatically. Seven of this project's own skills
  * had already diverged before the tool existed; two files that both "look right"
@@ -24,9 +27,9 @@ import {
   isDirectory,
   isFile,
   lstatOrNull,
-  moveToTrash,
+  moveToStaging,
+  purgeTree,
   readlinkOrNull,
-  removeTree,
 } from '../core/fs-safe.ts';
 import { skilloHome } from '../core/paths.ts';
 import { EXIT, envError, usageError, type ExitCode } from '../util/errors.ts';
@@ -46,14 +49,18 @@ export interface AdoptItem {
   skill: string;
   action: AdoptAction;
   detail?: string;
-  /** Set when something was moved aside; the user may want to recover it. */
-  trashPath?: string;
+  /**
+   * Staged packages that could not be deleted, so the step is not finished.
+   * Absent means everything staged was verified and discarded.
+   */
+  stagedPaths?: string[];
   diff?: string;
 }
 
 export interface AdoptInput {
   env: Env;
-  from: string;
+  /** Id of the harness to pull skills out of; given as the first positional. */
+  harness: string;
   /** Restrict to these skills; null means every adoptable directory. */
   skills: string[] | null;
   keep: 'ssot' | 'harness' | null;
@@ -63,7 +70,6 @@ export interface AdoptInput {
 
 export interface AdoptOutcome {
   items: AdoptItem[];
-  dryRun: boolean;
   exitCode: ExitCode;
 }
 
@@ -72,9 +78,11 @@ export interface AdoptOutcome {
  *
  * WorkBuddy drops `_user_meta.json` and `_skillhub_meta.json` next to SKILL.md.
  * Comparing them as content would report six false collisions on this machine
- * alone. They are excluded from comparison and, by design, left behind in the
- * trash when a harness directory is replaced by a link: the SSOT stays portable,
- * and provenance belongs in `annotations.json`, not in the skill tree.
+ * alone. They are excluded from comparison and, by design, never enter the SSOT:
+ * it stays portable, and provenance belongs in `annotations.json`, not in the
+ * skill tree. They leave with the staged package, so a market-installed skill
+ * loses WorkBuddy's local record of where it came from — `skillo annotate` is how
+ * that gets written down before adopting.
  */
 const PLATFORM_META: ReadonlySet<string> = new Set(['_user_meta.json', '_skillhub_meta.json']);
 
@@ -82,7 +90,7 @@ interface Context {
   env: Env;
   anchorPath: string;
   ssotRoot: string;
-  trashRoot: string;
+  stagingRoot: string;
   harness: Harness;
 }
 
@@ -92,10 +100,11 @@ export function runAdopt(input: AdoptInput): AdoptOutcome {
     throw envError('not initialized yet', 'run skillo init to create the anchor and config');
   }
 
-  const harness = config.harnesses.find((candidate) => candidate.id === input.from);
+  const harness = config.harnesses.find((candidate) => candidate.id === input.harness);
   if (harness === undefined) {
     throw usageError(
-      `unknown harness: ${input.from}`,
+      `unknown harness: ${input.harness}`,
+      'the first argument is the harness, not the skill: skillo adopt <harness> [skill]',
       `registered: ${config.harnesses.map((candidate) => candidate.id).join(', ') || '(none)'}`,
     );
   }
@@ -116,13 +125,13 @@ export function runAdopt(input: AdoptInput): AdoptOutcome {
     env: input.env,
     anchorPath: config.anchor,
     ssotRoot: anchor.ssotRoot,
-    trashRoot: path.join(skilloHome(input.env), '.trash'),
+    stagingRoot: path.join(skilloHome(input.env), '.tmp'),
     harness,
   };
 
   const candidates = input.skills ?? listAdoptable(harness.path);
   if (candidates.length === 0) {
-    return { items: [], dryRun: input.dryRun, exitCode: EXIT.OK };
+    return { items: [], exitCode: EXIT.OK };
   }
 
   const items: AdoptItem[] = [];
@@ -142,23 +151,48 @@ export function runAdopt(input: AdoptInput): AdoptOutcome {
   }
 
   const blocked = items.some((item) => item.action === 'conflict' || item.action === 'failed');
-  return { items, dryRun: input.dryRun, exitCode: blocked ? EXIT.CONFLICT : EXIT.OK };
+  return { items, exitCode: blocked ? EXIT.CONFLICT : EXIT.OK };
 }
 
-/** Move a directory to the trash, retrying the transient Windows lock errors. */
-function trashWithRetry(target: string, trashRoot: string, attempts = 3): string {
+/** Errors Windows throws when a handle is merely busy, not when the step failed. */
+const LOCK_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
+function withLockRetry<T>(action: () => T, attempts = 3): T {
   let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      return moveToTrash(target, trashRoot);
+      return action();
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES') throw err;
+      if (typeof code !== 'string' || !LOCK_CODES.has(code)) throw err;
       lastError = err;
       sleepMs(60 * (attempt + 1));
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+/** Move a directory into staging, retrying the transient Windows lock errors. */
+function stageWithRetry(target: string, stagingRoot: string, label: string): string {
+  return withLockRetry(() => moveToStaging(target, stagingRoot, label));
+}
+
+/**
+ * Delete the staged packages of a transfer that verified.
+ *
+ * Returns whatever survives. A package left in staging is not a cleanup detail —
+ * it is the sign that this skill is still holding two copies of itself.
+ */
+function discardStaged(stagingRoot: string, staged: readonly string[]): string[] {
+  const retained: string[] = [];
+  for (const target of staged) {
+    try {
+      withLockRetry(() => purgeTree(target, stagingRoot));
+    } catch {
+      retained.push(target);
+    }
+  }
+  return retained;
 }
 
 function sleepMs(ms: number): void {
@@ -222,11 +256,11 @@ function adoptOne(context: Context, name: string, input: AdoptInput): AdoptItem 
         detail: '[dry-run] identical apart from platform metadata, will only be replaced by a link',
       };
     }
-    const trash = trashWithRetry(harnessPath, context.trashRoot);
+    const staged = stageWithRetry(harnessPath, context.stagingRoot, 'harness');
     return replaceWithLink(context, name, harnessPath, {
       action: 'adopted-identical',
-      trashPath: trash,
-      detail: 'platform metadata (_user_meta.json and similar) went to the trash with the original directory; use skillo annotate to record provenance',
+      staged: [staged],
+      detail: 'identical to the SSOT apart from platform metadata; the staged copy is discarded with it — use skillo annotate to record provenance',
     });
   }
 
@@ -246,10 +280,11 @@ function adoptOne(context: Context, name: string, input: AdoptInput): AdoptItem 
     if (input.dryRun) {
       return { skill: name, action: 'adopted-kept-ssot', detail: '[dry-run] keep the SSOT version' };
     }
-    const trash = trashWithRetry(harnessPath, context.trashRoot);
+    const staged = stageWithRetry(harnessPath, context.stagingRoot, 'harness');
     return replaceWithLink(context, name, harnessPath, {
       action: 'adopted-kept-ssot',
-      trashPath: trash,
+      staged: [staged],
+      detail: `harness version discarded (${harnessHash.fileCount} file(s) vs ${ssotHash.fileCount} in the SSOT); run --diff before --keep to see it first`,
     });
   }
 
@@ -258,23 +293,22 @@ function adoptOne(context: Context, name: string, input: AdoptInput): AdoptItem 
     return { skill: name, action: 'adopted-kept-harness', detail: '[dry-run] overwrite the SSOT with the harness version' };
   }
 
-  const ssotBackup = trashWithRetry(ssotPath, context.trashRoot);
-  removeTree(ssotPath, context.ssotRoot);
+  const ssotBackup = stageWithRetry(ssotPath, context.stagingRoot, 'ssot');
   const copy = copyChecked(harnessPath, ssotPath);
   if (!copy.ok) {
     return {
       skill: name,
       action: 'failed',
-      detail: `copy verification failed: ${copy.reason}`,
-      trashPath: ssotBackup,
+      detail: `copy verification failed: ${copy.reason}; the SSOT entry was moved to staging and has not been restored`,
+      stagedPaths: [ssotBackup],
     };
   }
 
-  const harnessTrash = trashWithRetry(harnessPath, context.trashRoot);
+  const harnessStaged = stageWithRetry(harnessPath, context.stagingRoot, 'harness');
   return replaceWithLink(context, name, harnessPath, {
     action: 'adopted-kept-harness',
-    trashPath: ssotBackup,
-    detail: `harness version written to the SSOT; the old SSOT version is at ${ssotBackup}, the old harness directory at ${harnessTrash}`,
+    staged: [ssotBackup, harnessStaged],
+    detail: `harness version written to the SSOT; the SSOT's previous version is in git history if it was ever committed`,
   });
 }
 
@@ -294,13 +328,14 @@ function adoptNew(
     return { skill: name, action: 'failed', detail: `copy verification failed: ${copy.reason}` };
   }
 
-  const trash = trashWithRetry(harnessPath, context.trashRoot);
-  return replaceWithLink(context, name, harnessPath, { action: 'adopted', trashPath: trash });
+  const staged = stageWithRetry(harnessPath, context.stagingRoot, 'harness');
+  return replaceWithLink(context, name, harnessPath, { action: 'adopted', staged: [staged] });
 }
 
 interface ReplaceOptions {
   action: AdoptAction;
-  trashPath: string;
+  /** Packages moved aside for this skill; deleted once the link verifies. */
+  staged: string[];
   detail?: string;
 }
 
@@ -317,16 +352,21 @@ function replaceWithLink(
     return {
       skill: name,
       action: 'failed',
-      detail: `failed to create link: ${err instanceof Error ? err.message : String(err)}`,
-      trashPath: options.trashPath,
+      detail: `failed to create link, so nothing was discarded: ${err instanceof Error ? err.message : String(err)}`,
+      stagedPaths: options.staged,
     };
   }
+
+  // The link reads SKILL.md through the anchor, so the transfer is proven here —
+  // which is the moment the staged copy stops being a backup and becomes a second
+  // copy of the SSOT.
+  const retained = discardStaged(context.stagingRoot, options.staged);
 
   return {
     skill: name,
     action: options.action,
     ...(options.detail === undefined ? {} : { detail: options.detail }),
-    trashPath: options.trashPath,
+    ...(retained.length === 0 ? {} : { stagedPaths: retained }),
   };
 }
 

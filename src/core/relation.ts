@@ -7,17 +7,17 @@
  * reads.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 
 import type { Harness, RelationState, Skill } from '../types.ts';
-import { classifyEntry, lstatOrNull, readlinkOrNull, realpathOrNull } from './fs-safe.ts';
+import { classifyEntry, lstatOrNull, readlinkOrNull, realpathOrNull, treeSize } from './fs-safe.ts';
 import { samePath } from './paths.ts';
 
 export type SkillGroup = 'ok' | 'undistributed' | 'problem';
 
 export interface RelationCell {
   harnessId: string;
-  harnessName: string;
   state: RelationState;
   /**
    * True when the harness reads the anchor directory natively.
@@ -116,11 +116,10 @@ export function buildRelations(input: BuildRelationsInput): SkillRelations[] {
       // "configured" by definition. Running classifyEntry here would report
       // conflict for each one, which is both wrong and unactionable.
       if (nativeIds.has(harness.id)) {
-        return { harnessId: harness.id, harnessName: harness.name, state: 'linked' as const, native: true };
+        return { harnessId: harness.id, state: 'linked' as const, native: true };
       }
       return {
         harnessId: harness.id,
-        harnessName: harness.name,
         state: classifyEntry(path.join(harness.path, skill.name), classifyOptions),
         native: false,
       };
@@ -128,6 +127,69 @@ export function buildRelations(input: BuildRelationsInput): SkillRelations[] {
 
     return { skill, cells, group: classifyGroup(cells) };
   });
+}
+
+export interface HarnessEntry {
+  name: string;
+  state: RelationState;
+  /** True when the harness reads the anchor itself; then the entries *are* the SSOT. */
+  native: boolean;
+  /** Raw link target, only for entries that are links. */
+  target: string | null;
+  /** Size of a real directory; null for links and plain files. */
+  sizeBytes: number | null;
+  /** The SSOT already holds something with this name. */
+  inSsot: boolean;
+}
+
+export interface HarnessScanInput {
+  harness: Harness;
+  anchorPath: string;
+  anchorReal: string | null;
+  ssotNames: ReadonlySet<string>;
+}
+
+/**
+ * Every entry inside one harness's skills directory, including the ones the SSOT
+ * has never heard of.
+ *
+ * `buildRelations` walks the other direction: SSOT → harness. That is exactly why
+ * a skill installed only in WorkBuddy is invisible in `list` — no SSOT row, no
+ * cell. This view is the one that finds those directories, and `adopt` is what
+ * does something with them.
+ */
+export function scanHarnessEntries(input: HarnessScanInput): HarnessEntry[] {
+  const { harness, anchorPath, anchorReal, ssotNames } = input;
+  const native = isNativeHarness(harness, anchorPath, anchorReal);
+
+  let names: string[];
+  try {
+    names = fs.readdirSync(harness.path).sort();
+  } catch {
+    return [];
+  }
+
+  const entries: HarnessEntry[] = [];
+  for (const name of names) {
+    if (name.startsWith('.')) continue;
+
+    const full = path.join(harness.path, name);
+    const st = lstatOrNull(full);
+    if (st === null) continue;
+
+    entries.push({
+      name,
+      // The same short-circuit buildRelations uses: under a native harness a plain
+      // directory is the SSOT entry seen through the anchor, not a rival copy.
+      state: native ? 'linked' : classifyEntry(full, { anchorReal, anchorPath }),
+      native,
+      target: st.isSymbolicLink() ? readlinkOrNull(full) : null,
+      sizeBytes: st.isDirectory() ? treeSize(full) : null,
+      inSsot: ssotNames.has(name),
+    });
+  }
+
+  return entries;
 }
 
 export interface HarnessNote {
@@ -192,19 +254,9 @@ export function countGroups(rows: readonly SkillRelations[]): RelationCounts {
   return counts;
 }
 
-/** Harness ids where the skill is healthy. Native harnesses are excluded — they are reported once at the top. */
-export function linkedHarnesses(row: SkillRelations): string[] {
-  return row.cells.filter((cell) => cell.state === 'linked' && !cell.native).map((cell) => cell.harnessId);
-}
-
 /** Harness ids that read the anchor directly, in registration order. */
 export function nativeHarnessIds(harnesses: readonly Harness[], anchorPath: string, anchorReal: string | null): string[] {
   return harnesses
     .filter((harness) => harness.enabled && isNativeHarness(harness, anchorPath, anchorReal))
     .map((harness) => harness.id);
-}
-
-/** Cells that need attention, paired with their state for inline display. */
-export function problemCells(row: SkillRelations): RelationCell[] {
-  return row.cells.filter((cell) => PROBLEM_STATES.includes(cell.state));
 }

@@ -9,10 +9,13 @@
  * is not the default because it degrades badly past ~20 skills.
  */
 
+import path from 'node:path';
+
 import type { Env, Harness, RelationState } from '../types.ts';
-import type { RelationCounts, SkillGroup, SkillRelations } from '../core/relation.ts';
+import type { HarnessEntry, RelationCounts, SkillGroup, SkillRelations } from '../core/relation.ts';
 import { toDisplay } from '../core/paths.ts';
-import { displayWidth, padDisplay, truncateDisplay } from '../util/text.ts';
+import { assertNever } from '../util/assert.ts';
+import { displayWidth, formatBytes, padDisplay, truncateDisplay } from '../util/text.ts';
 
 /* ─────────────────────────────── palette ───────────────────────────── */
 
@@ -40,6 +43,8 @@ export function makePalette(enabled: boolean): Palette {
 /** True when ANSI colour should be emitted. */
 export function colourEnabled(stream: { isTTY?: boolean }): boolean {
   if (process.env['NO_COLOR'] !== undefined) return false;
+  const force = process.env['FORCE_COLOR'];
+  if (force !== undefined && force !== '0') return true;
   if (process.env['TERM'] === 'dumb') return false;
   return stream.isTTY === true;
 }
@@ -68,6 +73,8 @@ function paintState(state: RelationState, palette: Palette): string {
     case 'conflict':
     case 'invalid':
       return palette.error(glyph);
+    default:
+      return assertNever(state, 'unhandled relation state');
   }
 }
 
@@ -99,6 +106,8 @@ export interface ListView {
 export interface RenderOptions {
   env: Env;
   palette: Palette;
+  /** Anchor path, so the detail view can show where a skill is linked from. */
+  anchorPath?: string;
 }
 
 const NAME_COL = 34;
@@ -126,6 +135,8 @@ function groupHeader(group: SkillGroup, count: number, palette: Palette): string
       return palette.warn(`  ○ not distributed (${count})`);
     case 'problem':
       return palette.error(`  ! needs attention (${count})`);
+    default:
+      return assertNever(group, 'unhandled skill group');
   }
 }
 
@@ -186,7 +197,8 @@ export function renderOverview(view: ListView, options: RenderOptions): string {
   }
   lines.push('');
 
-  const order: SkillGroup[] = ['ok', 'undistributed', 'problem'];
+  // Problems first: an alarm buried under healthy rows is an alarm nobody reads.
+  const order: SkillGroup[] = ['problem', 'undistributed', 'ok'];
 
   for (const group of order) {
     const members = view.rows.filter((row) => row.group === group);
@@ -222,6 +234,9 @@ export function renderDetail(row: SkillRelations, options: RenderOptions): strin
     `  ${padColoured(skill.name, palette.bold(skill.name), nameWidth)}${palette.dim('source: ')}${skill.source}`,
   );
   lines.push(`  ${palette.dim('SKILL ')} ${toDisplay(skill.path, options.env)}`);
+  if (options.anchorPath !== undefined) {
+    lines.push(`  ${palette.dim('ANCHOR')} ${toDisplay(path.join(options.anchorPath, skill.name), options.env)}`);
+  }
   if (skill.origin !== null) {
     lines.push(`  ${palette.dim('ORIGIN')} ${skill.origin}`);
   }
@@ -281,6 +296,115 @@ export function renderMatrix(rows: readonly SkillRelations[], harnesses: readonl
   return lines.join('\n') + '\n';
 }
 
+/* ────────────────────────── one harness directory ───────────────────── */
+
+export interface HarnessView {
+  harness: Harness;
+  /** Every entry in the harness's own skills directory, SSOT-known or not. */
+  entries: readonly HarnessEntry[];
+  ssotRoot: string;
+  /** The harness reads the anchor itself, so it holds no links of its own. */
+  native: boolean;
+  /** Harness-level problems that explain the whole directory. */
+  notes: readonly string[];
+}
+
+type HarnessBucket = 'adoptable' | 'clash' | 'attention' | 'linked';
+
+function bucketOf(entry: HarnessEntry): HarnessBucket {
+  if (entry.state === 'linked') return 'linked';
+  if (entry.state === 'conflict') return entry.inSsot ? 'clash' : 'adoptable';
+  return 'attention';
+}
+
+function bucketHeader(bucket: HarnessBucket, count: number, native: boolean, palette: Palette): string {
+  switch (bucket) {
+    case 'adoptable':
+      return `${palette.warn(`  ○ adoptable (${count})`)}${palette.dim('  real directory, not in the SSOT')}`;
+    case 'clash':
+      return `${palette.error(`  ! needs a decision (${count})`)}${palette.dim('  real directory, same name already in the SSOT')}`;
+    case 'attention':
+      return `${palette.error(`  ! needs attention (${count})`)}`;
+    case 'linked':
+      // A native harness holds no links of its own; calling its entries "linked"
+      // would describe the junction it does not have.
+      return native
+        ? `${palette.ok(`  ✓ in the SSOT (${count})`)}`
+        : `${palette.ok(`  ✓ linked (${count})`)}${palette.dim('  through the anchor')}`;
+    default:
+      return assertNever(bucket, 'unhandled harness bucket');
+  }
+}
+
+function harnessEntryLine(entry: HarnessEntry, width: number, palette: Palette): string {
+  const name = padDisplay(entry.name, width);
+
+  if (entry.state === 'linked') return `    ${name}`;
+
+  if (bucketOf(entry) === 'attention') {
+    const target = entry.target === null ? '' : palette.dim(` → ${entry.target}`);
+    return `    ${name}${palette.dim(STATE_LABEL[entry.state])}${target}`;
+  }
+  const size = entry.sizeBytes === null ? '' : palette.dim(formatBytes(entry.sizeBytes));
+  return `    ${name}${size}`;
+}
+
+/**
+ * Adoptables first, links last.
+ *
+ * The reverse of the overview's problems-first rule, because this view exists to
+ * answer "what can I still pull in" — and a harness with everything already
+ * adopted is the boring, healthy case.
+ */
+export function renderHarnessView(view: HarnessView, options: RenderOptions): string {
+  const { palette } = options;
+  const lines: string[] = [];
+  const buckets: HarnessBucket[] = ['adoptable', 'clash', 'attention', 'linked'];
+  const adoptable = view.entries.filter((entry) => bucketOf(entry) === 'adoptable').length;
+  const clashes = view.entries.filter((entry) => bucketOf(entry) === 'clash').length;
+
+  lines.push(
+    `${palette.bold(view.harness.id)}${palette.dim(' · ')}${view.entries.length} ${
+      view.entries.length === 1 ? 'entry' : 'entries'
+    }${adoptable + clashes > 0 ? palette.dim(' · ') + `${adoptable + clashes} to adopt` : ''}`,
+  );
+  lines.push(`${palette.dim('DIR   ')} ${toDisplay(view.harness.path, options.env)}`);
+  if (view.native) {
+    lines.push(`${palette.dim('      ')} ${palette.ok('≡')} ${palette.dim('reads the anchor natively: its entries are the SSOT itself')}`);
+  }
+  for (const note of view.notes) {
+    lines.push(`${palette.dim('      ')} ${palette.warn(note)}`);
+  }
+  lines.push('');
+
+  const width = Math.max(NAME_COL, ...view.entries.map((entry) => displayWidth(entry.name))) + 2;
+
+  for (const bucket of buckets) {
+    const members = view.entries.filter((entry) => bucketOf(entry) === bucket);
+    if (members.length === 0) continue;
+
+    lines.push(bucketHeader(bucket, members.length, view.native, palette));
+    for (const entry of members) lines.push(harnessEntryLine(entry, width, palette));
+    lines.push('');
+  }
+
+  if (view.entries.length === 0) {
+    lines.push(palette.dim(`  no skills in ${toDisplay(view.harness.path, options.env)}`));
+    lines.push('');
+  }
+
+  if (!view.native && adoptable + clashes > 0) {
+    lines.push(
+      palette.dim(
+        `  skillo adopt ${view.harness.id} [<skill>] brings the real directories into the SSOT and leaves a link behind`,
+      ),
+    );
+    lines.push('');
+  }
+
+  return lines.join('\n').replace(/\n+$/, '\n');
+}
+
 /* ──────────────────────────────── json ─────────────────────────────── */
 
 export interface JsonEnvelope {
@@ -288,6 +412,23 @@ export interface JsonEnvelope {
   data?: unknown;
   error?: { code: string; message: string };
   warnings: string[];
+}
+
+export function detailJson(row: SkillRelations, anchorPath?: string): JsonEnvelope {
+  return {
+    ok: true,
+    data: {
+      name: row.skill.name,
+      path: row.skill.path,
+      anchorPath: anchorPath === undefined ? null : path.join(anchorPath, row.skill.name),
+      source: row.skill.source,
+      origin: row.skill.origin,
+      description: row.skill.description,
+      group: row.group,
+      cells: row.cells.map((cell) => ({ harness: cell.harnessId, state: cell.state })),
+    },
+    warnings: [],
+  };
 }
 
 export function listJson(view: ListView): JsonEnvelope {
@@ -319,5 +460,25 @@ export function listJson(view: ListView): JsonEnvelope {
       })),
     },
     warnings: [...view.warnings],
+  };
+}
+
+export function harnessJson(view: HarnessView): JsonEnvelope {
+  return {
+    ok: true,
+    data: {
+      harness: { id: view.harness.id, name: view.harness.name, path: view.harness.path, native: view.native },
+      ssotRoot: view.ssotRoot,
+      notes: [...view.notes],
+      entries: view.entries.map((entry) => ({
+        name: entry.name,
+        state: entry.state,
+        native: entry.native,
+        inSsot: entry.inSsot,
+        target: entry.target,
+        sizeBytes: entry.sizeBytes,
+      })),
+    },
+    warnings: [],
   };
 }

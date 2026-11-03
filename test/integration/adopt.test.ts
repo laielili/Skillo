@@ -3,7 +3,9 @@
  *
  * This is the only command that overwrites skill content, so each case checks
  * three things: what the SSOT ends up containing, what the harness ends up
- * containing, and whether the loser of any collision still exists in the trash.
+ * containing, and whether a verified transfer left anything behind in staging.
+ * Nothing should survive in `.tmp` unless a step failed — a staged copy of what
+ * the SSOT now holds is the redundancy this tool exists to remove.
  */
 
 import { describe, test } from 'node:test';
@@ -20,12 +22,14 @@ interface Box {
   env: Env;
   ssot: string;
   harness: string;
-  trash: string;
+  staging: string;
   addSsot(name: string, body: string): void;
   addHarness(name: string, body: string): void;
   ssotBody(name: string): string;
   harnessBody(name: string): string;
   isLinked(name: string): boolean;
+  /** Packages still in `~/.skillo/.tmp`; empty means every transfer verified and cleaned up. */
+  staged(): string[];
   cleanup(): void;
 }
 
@@ -34,7 +38,7 @@ function makeBox(): Box {
   const home = path.join(root, 'home');
   const ssot = path.join(home, '.agents', 'skills');
   const harness = path.join(home, '.workbuddy', 'skills');
-  const trash = path.join(home, '.skillo', '.trash');
+  const staging = path.join(home, '.skillo', '.tmp');
   fs.mkdirSync(ssot, { recursive: true });
   fs.mkdirSync(harness, { recursive: true });
 
@@ -52,7 +56,7 @@ function makeBox(): Box {
     env: { home, cwd: root },
     ssot,
     harness,
-    trash,
+    staging,
     addSsot: (name, body) => write(path.join(ssot, name), name, body),
     addHarness: (name, body) => write(path.join(harness, name), name, body),
     ssotBody: (name) => fs.readFileSync(path.join(ssot, name, 'SKILL.md'), 'utf8'),
@@ -61,6 +65,7 @@ function makeBox(): Box {
       const p = path.join(harness, name);
       return fs.existsSync(p) && fs.lstatSync(p).isSymbolicLink();
     },
+    staged: () => (fs.existsSync(staging) ? fs.readdirSync(staging) : []),
     cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
   };
 }
@@ -77,13 +82,13 @@ describe('skillo adopt', () => {
       box.addHarness('humanizer', 'harness version');
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
+      const result = runCli(['adopt', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 0, result.stderr);
 
       assert.ok(fs.existsSync(path.join(box.ssot, 'humanizer', 'SKILL.md')), 'copied into SSOT');
       assert.match(box.ssotBody('humanizer'), /harness version/);
       assert.equal(box.isLinked('humanizer'), true, 'harness entry replaced by a link');
-      assert.ok(fs.existsSync(path.join(box.trash)), 'original moved to trash');
+      assert.deepEqual(box.staged(), [], 'the staged copy is deleted once the transfer verifies');
     } finally {
       box.cleanup();
     }
@@ -97,7 +102,7 @@ describe('skillo adopt', () => {
       box.addHarness('markitdown', identical);
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
+      const result = runCli(['adopt', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 0, result.stderr);
       assert.match(result.stdout, /adopted-identical/);
       assert.equal(box.isLinked('markitdown'), true);
@@ -119,7 +124,7 @@ describe('skillo adopt', () => {
       );
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
+      const result = runCli(['adopt', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 0, 'metadata-only difference must not be a collision');
       assert.match(result.stdout, /adopted-identical/);
       assert.equal(box.isLinked('humanizer'), true);
@@ -140,7 +145,7 @@ describe('skillo adopt', () => {
       box.addHarness('grill-with-docs', 'harness body');
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
+      const result = runCli(['adopt', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 3);
       assert.match(result.stdout, /conflict/);
     } finally {
@@ -155,7 +160,7 @@ describe('skillo adopt', () => {
       box.addHarness('grill-me', 'harness version');
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
+      const result = runCli(['adopt', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 3, 'conflict exit code');
       assert.match(result.stdout, /conflict/);
 
@@ -167,41 +172,71 @@ describe('skillo adopt', () => {
     }
   });
 
-  test('--keep ssot discards the harness copy but keeps it in the trash', () => {
+  test('--keep ssot discards the losing harness copy once the link verifies', () => {
     const box = makeBox();
     try {
       box.addSsot('grill-me', 'ssot version');
       box.addHarness('grill-me', 'harness version');
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy', 'grill-me', '--keep', 'ssot'], box.env);
+      const result = runCli(['adopt', 'workbuddy', 'grill-me', '--keep', 'ssot'], box.env);
       assert.equal(result.exitCode, 0, result.stderr);
 
       assert.match(box.ssotBody('grill-me'), /ssot version/);
       assert.equal(box.isLinked('grill-me'), true);
-
-      const trashed = fs.readdirSync(box.trash);
-      assert.equal(trashed.some((name) => name.includes('grill-me')), true, 'harness copy recoverable');
+      assert.deepEqual(box.staged(), [], 'the loser is not kept as a second copy');
     } finally {
       box.cleanup();
     }
   });
 
-  test('--keep harness overwrites the SSOT but backs up the old version first', () => {
+  test('--keep harness overwrites the SSOT and cleans both packages', () => {
     const box = makeBox();
     try {
       box.addSsot('grill-me', 'old ssot version');
       box.addHarness('grill-me', 'new harness version');
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy', 'grill-me', '--keep', 'harness'], box.env);
+      const result = runCli(['adopt', 'workbuddy', 'grill-me', '--keep', 'harness'], box.env);
       assert.equal(result.exitCode, 0, result.stderr);
 
       assert.match(box.ssotBody('grill-me'), /new harness version/, 'SSOT now holds the harness copy');
       assert.equal(box.isLinked('grill-me'), true);
+      assert.deepEqual(box.staged(), [], 'old SSOT version and harness directory both deleted after verification');
+    } finally {
+      box.cleanup();
+    }
+  });
 
-      const trashed = fs.readdirSync(box.trash);
-      assert.equal(trashed.some((name) => name.includes('grill-me')), true, 'old SSOT version recoverable');
+  test('a failed copy leaves the staged package and says so', () => {
+    const box = makeBox();
+    try {
+      box.addSsot('grill-me', 'old ssot version');
+      box.addHarness('grill-me', 'new harness version');
+      // An internal link cannot be copied, so the transfer stops after the SSOT
+      // entry has already been moved to staging.
+      fs.symlinkSync(box.ssot, path.join(box.harness, 'grill-me', 'inner-link'), 'junction');
+      init(box);
+
+      const result = runCli(['adopt', 'workbuddy', 'grill-me', '--keep', 'harness'], box.env);
+      assert.equal(result.exitCode, 3, result.stderr);
+      assert.match(result.stdout, /left in ~\\\.skillo\\\.tmp|packages left in/);
+      assert.match(result.stdout, /-ssot-grill-me/, 'the staged package names the side and the skill');
+
+      assert.ok(
+        box.staged().some((name) => name.endsWith('-ssot-grill-me')),
+        'an unverified transfer keeps its package',
+      );
+      const stagedEntry = box.staged().find((name) => name.endsWith('-ssot-grill-me'));
+      assert.match(
+        fs.readFileSync(path.join(box.staging, stagedEntry ?? '', 'SKILL.md'), 'utf8'),
+        /old ssot version/,
+        'the discarded SSOT version is still recoverable from staging',
+      );
+      // Known gap, asserted so it cannot pass unnoticed: the failed copy is not
+      // rolled back, so the SSOT keeps the half-written entry (minus the link).
+      assert.equal(fs.existsSync(path.join(box.ssot, 'grill-me', 'inner-link')), false);
+      assert.match(box.harnessBody('grill-me'), /new harness version/, 'harness content untouched');
     } finally {
       box.cleanup();
     }
@@ -213,7 +248,7 @@ describe('skillo adopt', () => {
       box.addHarness('humanizer', 'harness version');
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy', '--dry-run'], box.env);
+      const result = runCli(['adopt', 'workbuddy', '--dry-run'], box.env);
       assert.equal(result.exitCode, 0);
       assert.match(result.stdout, /dry-run/);
       assert.equal(fs.existsSync(path.join(box.ssot, 'humanizer')), false, 'nothing copied');
@@ -230,7 +265,7 @@ describe('skillo adopt', () => {
       box.addHarness('grill-me', 'harness only line');
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy', 'grill-me', '--diff'], box.env);
+      const result = runCli(['adopt', 'workbuddy', 'grill-me', '--diff'], box.env);
       assert.equal(result.exitCode, 0);
 
       // Either git produced a real diff, or we fell back to printing both paths.
@@ -251,7 +286,7 @@ describe('skillo adopt', () => {
       fs.symlinkSync(box.ssot, box.harness, 'junction');
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
+      const result = runCli(['adopt', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 2);
       assert.match(result.stderr, /is itself a link/);
       assert.match(result.stderr, /doctor --fix/);
@@ -270,13 +305,65 @@ describe('skillo adopt', () => {
       fs.writeFileSync(path.join(box.ssot, 'beta'), 'blocking file', 'utf8');
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
+      const result = runCli(['adopt', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 3, 'partial failure reported, not a crash');
 
       assert.equal(box.isLinked('alpha'), true, 'alpha still adopted');
       assert.equal(box.isLinked('gamma'), true, 'gamma still adopted');
       assert.equal(box.isLinked('beta'), false, 'beta failed');
       assert.match(result.stdout, /failed/);
+    } finally {
+      box.cleanup();
+    }
+  });
+
+  test('the harness is the first positional, and --from is gone', () => {
+    const box = makeBox();
+    try {
+      box.addHarness('humanizer', 'harness version');
+      init(box);
+
+      const old = runCli(['adopt', '--from', 'workbuddy'], box.env);
+      assert.equal(old.exitCode, 2, '--from no longer selects the harness');
+      assert.match(old.stderr, /missing <harness>/);
+
+      const now = runCli(['adopt', 'workbuddy'], box.env);
+      assert.equal(now.exitCode, 0, now.stderr);
+      assert.equal(box.isLinked('humanizer'), true);
+    } finally {
+      box.cleanup();
+    }
+  });
+
+  test('a skill name in the harness slot is explained, not guessed', () => {
+    const box = makeBox();
+    try {
+      box.addHarness('humanizer', 'harness version');
+      init(box);
+
+      const result = runCli(['adopt', 'humanizer'], box.env);
+      assert.equal(result.exitCode, 2);
+      assert.match(result.stderr, /unknown harness: humanizer/);
+      assert.match(result.stderr, /first argument is the harness/);
+      assert.match(result.stderr, /registered: workbuddy/);
+    } finally {
+      box.cleanup();
+    }
+  });
+
+  test('several skills can be adopted in one call', () => {
+    const box = makeBox();
+    try {
+      box.addHarness('alpha', 'a');
+      box.addHarness('beta', 'b');
+      box.addHarness('gamma', 'g');
+      init(box);
+
+      const result = runCli(['adopt', 'workbuddy', 'alpha', 'gamma'], box.env);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(box.isLinked('alpha'), true);
+      assert.equal(box.isLinked('gamma'), true);
+      assert.equal(box.isLinked('beta'), false, 'beta was not named');
     } finally {
       box.cleanup();
     }
@@ -289,7 +376,7 @@ describe('skillo adopt', () => {
       fs.writeFileSync(path.join(box.harness, 'not-a-skill', 'notes.txt'), 'x', 'utf8');
       init(box);
 
-      const result = runCli(['adopt', '--from', 'workbuddy'], box.env);
+      const result = runCli(['adopt', 'workbuddy'], box.env);
       assert.equal(result.exitCode, 0);
       assert.equal(fs.existsSync(path.join(box.ssot, 'not-a-skill')), false);
     } finally {
