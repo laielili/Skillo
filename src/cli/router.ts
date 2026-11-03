@@ -28,7 +28,7 @@ export interface RunOutcome {
   exitCode: ExitCode;
 }
 
-export const VERSION = '0.1.6';
+export const VERSION = '0.1.7';
 
 export const HELP = `skillo — one skill, one source of truth, every agentic tool
 

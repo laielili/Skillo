@@ -1,6 +1,6 @@
 {
   "name": "skillo",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "One skill, one source of truth, every agentic tool.",
   "type": "module",
   "bin": {
